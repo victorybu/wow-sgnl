@@ -4,6 +4,8 @@ import { scoreRelevance } from '@/lib/relevance';
 import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const fetchCache = 'force-no-store';
 export const maxDuration = 300;
 
 const TWITTERAPI_DELAY_MS = 5500;
@@ -14,9 +16,11 @@ export async function GET() {
   const debug: any = { watchlist_count: 0, fetched_per_watcher: [], unscored_count: 0 };
 
   const watchlist = await sql`
-    SELECT w.*, c.id as client_id, c.name as client_name, c.priority_topics
+    SELECT w.id, w.client_id, w.kind, w.value, w.active,
+           c.name as client_name, c.priority_topics, c.voice_profile
     FROM watchlist w JOIN clients c ON c.id = w.client_id
     WHERE w.active = TRUE
+    ORDER BY w.id
   `;
   debug.watchlist_count = watchlist.rows.length;
 
@@ -51,10 +55,11 @@ export async function GET() {
   }
 
   const unscored = await sql`
-    SELECT e.*, c.name as client_name, c.priority_topics
+    SELECT e.id, e.client_id, e.source, e.content, e.author,
+           c.name as client_name, c.priority_topics
     FROM events e JOIN clients c ON c.id = e.client_id
     WHERE e.relevance_score IS NULL
-    ORDER BY e.created_at DESC
+    ORDER BY e.created_at DESC, e.id DESC
     LIMIT 30
   `;
   debug.unscored_count = unscored.rows.length;
