@@ -7,11 +7,15 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 export async function GET() {
+  const errors: string[] = [];
+  const debug: any = { watchlist_count: 0, fetched_per_watcher: [], unscored_count: 0 };
+
   const watchlist = await sql`
     SELECT w.*, c.id as client_id, c.name as client_name, c.priority_topics
     FROM watchlist w JOIN clients c ON c.id = w.client_id
     WHERE w.active = TRUE
   `;
+  debug.watchlist_count = watchlist.rowCount;
 
   let inserted = 0;
   let scored = 0;
@@ -22,6 +26,8 @@ export async function GET() {
       if (w.kind === 'x_account') tweets = await fetchUserTweets(w.value);
       else if (w.kind === 'x_keyword') tweets = await searchTweets(w.value);
       else continue;
+
+      debug.fetched_per_watcher.push({ value: w.value, kind: w.kind, count: tweets.length });
 
       for (const t of tweets) {
         const url = `https://x.com/${t.author?.userName || ''}/status/${t.id}`;
@@ -34,7 +40,7 @@ export async function GET() {
         if (result.rowCount && result.rowCount > 0) inserted++;
       }
     } catch (e: any) {
-      console.error(`watchlist ${w.id} failed:`, e.message);
+      errors.push(`${w.value} (${w.kind}): ${e.message}`);
     }
   }
 
@@ -45,6 +51,8 @@ export async function GET() {
     ORDER BY e.created_at DESC
     LIMIT 30
   `;
+  debug.unscored_count = unscored.rowCount;
+
   for (const e of unscored.rows) {
     try {
       const r = await scoreRelevance({
@@ -57,9 +65,9 @@ export async function GET() {
       if (r.score < 5) await sql`UPDATE events SET status = 'ignored' WHERE id = ${e.id}`;
       scored++;
     } catch (err: any) {
-      console.error(`score ${e.id} failed:`, err.message);
+      errors.push(`score event ${e.id}: ${err.message}`);
     }
   }
 
-  return NextResponse.json({ ok: true, inserted, scored });
+  return NextResponse.json({ ok: true, inserted, scored, debug, errors });
 }
