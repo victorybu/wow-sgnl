@@ -19,8 +19,8 @@ export async function GET() {
   for (const w of watchlist.rows) {
     try {
       let tweets: any[] = [];
-      if (w.kind === 'x_account') tweets = await fetchUserTweets(w.value, 120);
-      else if (w.kind === 'x_keyword') tweets = await searchTweets(w.value, 120);
+      if (w.kind === 'x_account') tweets = await fetchUserTweets(w.value);
+      else if (w.kind === 'x_keyword') tweets = await searchTweets(w.value);
       else continue;
 
       for (const t of tweets) {
