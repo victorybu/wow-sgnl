@@ -3,6 +3,7 @@ import { fetchUserTweets, searchTweets } from '@/lib/twitterapi';
 import { scoreRelevance } from '@/lib/relevance';
 import { NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 export async function GET() {
