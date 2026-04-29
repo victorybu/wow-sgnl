@@ -1,4 +1,4 @@
-import { sql } from '@vercel/postgres';
+import { sql } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 
 export const dynamic = 'force-dynamic';

@@ -1,4 +1,11 @@
-import { sql } from '@vercel/postgres';
+import { neon } from '@neondatabase/serverless';
+
+const url = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+if (!url) {
+  throw new Error('DATABASE_URL or POSTGRES_URL must be set');
+}
+
+export const sql: any = neon(url, { fullResults: true });
 
 export async function initSchema() {
   await sql`

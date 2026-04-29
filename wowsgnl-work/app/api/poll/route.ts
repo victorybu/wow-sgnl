@@ -1,4 +1,4 @@
-import { sql } from '@vercel/postgres';
+import { sql } from '@/lib/db';
 import { fetchUserTweets, searchTweets } from '@/lib/twitterapi';
 import { scoreRelevance } from '@/lib/relevance';
 import { NextResponse } from 'next/server';

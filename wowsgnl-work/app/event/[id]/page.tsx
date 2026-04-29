@@ -1,4 +1,4 @@
-import { sql } from '@vercel/postgres';
+import { sql } from '@/lib/db';
 import { generateAngles, generatePosts } from '@/lib/drafts';
 import { revalidatePath } from 'next/cache';
 

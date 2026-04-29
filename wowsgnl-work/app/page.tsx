@@ -1,4 +1,4 @@
-import { sql } from '@vercel/postgres';
+import { sql } from '@/lib/db';
 import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
@@ -18,6 +18,7 @@ export default async function Home() {
         <div className="space-x-4 text-sm">
           <Link href="/watchlist" className="underline">Watchlist</Link>
           <Link href="/clients" className="underline">Clients</Link>
+          <Link href="/run" className="underline">Run live</Link>
           <Link href="/api/setup" className="underline opacity-60">Init DB</Link>
           <Link href="/api/poll" className="underline opacity-60">Run Poll</Link>
         </div>
