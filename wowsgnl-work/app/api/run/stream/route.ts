@@ -5,6 +5,9 @@ import { scoreRelevance } from '@/lib/relevance';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
+const TWITTERAPI_DELAY_MS = 5500;
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
 export async function GET() {
   const encoder = new TextEncoder();
 
@@ -22,10 +25,13 @@ export async function GET() {
           FROM watchlist w JOIN clients c ON c.id = w.client_id
           WHERE w.active = TRUE
         `;
-        send('watchlist', { count: watchlist.rowCount });
+        send('watchlist', { count: watchlist.rows.length });
 
         let inserted = 0;
+        let firstFetch = true;
         for (const w of watchlist.rows) {
+          if (!firstFetch) await sleep(TWITTERAPI_DELAY_MS);
+          firstFetch = false;
           send('fetch_start', { value: w.value, kind: w.kind, client: w.client_name });
           let tweets: any[] = [];
           try {
@@ -45,7 +51,7 @@ export async function GET() {
               ON CONFLICT (source, source_id) DO NOTHING
               RETURNING id
             `;
-            if (result.rowCount && result.rowCount > 0) {
+            if (result.rows.length > 0) {
               inserted++;
               send('tweet', {
                 event_id: result.rows[0].id,
@@ -64,7 +70,7 @@ export async function GET() {
           ORDER BY e.created_at DESC
           LIMIT 30
         `;
-        send('unscored', { count: unscored.rowCount });
+        send('unscored', { count: unscored.rows.length });
 
         let scored = 0;
         for (const e of unscored.rows) {

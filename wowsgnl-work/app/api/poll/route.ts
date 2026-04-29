@@ -4,7 +4,10 @@ import { scoreRelevance } from '@/lib/relevance';
 import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 300;
+
+const TWITTERAPI_DELAY_MS = 5500;
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 export async function GET() {
   const errors: string[] = [];
@@ -15,13 +18,16 @@ export async function GET() {
     FROM watchlist w JOIN clients c ON c.id = w.client_id
     WHERE w.active = TRUE
   `;
-  debug.watchlist_count = watchlist.rowCount;
+  debug.watchlist_count = watchlist.rows.length;
 
   let inserted = 0;
   let scored = 0;
 
+  let firstFetch = true;
   for (const w of watchlist.rows) {
     try {
+      if (!firstFetch) await sleep(TWITTERAPI_DELAY_MS);
+      firstFetch = false;
       let tweets: any[] = [];
       if (w.kind === 'x_account') tweets = await fetchUserTweets(w.value);
       else if (w.kind === 'x_keyword') tweets = await searchTweets(w.value);
@@ -37,7 +43,7 @@ export async function GET() {
           ON CONFLICT (source, source_id) DO NOTHING
           RETURNING id
         `;
-        if (result.rowCount && result.rowCount > 0) inserted++;
+        if (result.rows.length > 0) inserted++;
       }
     } catch (e: any) {
       errors.push(`${w.value} (${w.kind}): ${e.message}`);
@@ -51,7 +57,7 @@ export async function GET() {
     ORDER BY e.created_at DESC
     LIMIT 30
   `;
-  debug.unscored_count = unscored.rowCount;
+  debug.unscored_count = unscored.rows.length;
 
   for (const e of unscored.rows) {
     try {
