@@ -37,7 +37,7 @@ I add items via the GitHub mobile editor or laptop anytime — Claude picks them
 
 ## Build order & status
 
-- [x] **Item 1 — Multi-client with modes (foundation)** — `in-progress` since 2026-04-30
+- [x] **Item 1 — Multi-client with modes (foundation)** — `shipped` 2026-04-30 (commit b4c46ce)
 - [ ] Item 2 — Recalibrate scoring — `queued`
 - [ ] Item 3 — Auto-seed voice from historical performance — `queued`
 - [ ] Item 4 — Automated engagement capture post-ship — `queued`
@@ -51,7 +51,7 @@ I add items via the GitHub mobile editor or laptop anytime — Claude picks them
 
 ## Item 1 — Multi-client with modes (foundation)
 
-Status: `in-progress` (started 2026-04-30)
+Status: `shipped` 2026-04-30 (commit b4c46ce)
 
 Add a `mode` column to the `clients` table: `'drafting' | 'intelligence'`.
 
