@@ -1,9 +1,11 @@
 import { anthropic } from './anthropic';
+import { composeVoiceBlock, VoiceExample } from './voice';
 
 export async function generateAngles(args: {
   event: string;
   clientName: string;
   voiceProfile: string;
+  voiceExamples?: VoiceExample[];
 }): Promise<string[]> {
   const sys = `You are a senior digital strategist. Given an event, propose 3 distinct strategic angles a client could take in response. Each angle is one short sentence describing the *positioning*, not a draft post.
 
@@ -11,8 +13,11 @@ Output JSON only: {"angles": ["...", "...", "..."]}
 
 Be sharp and contrarian. No generic angles like "show empathy" or "offer thought leadership."`;
 
+  const voiceBlock = composeVoiceBlock(args.voiceProfile || '', args.voiceExamples || []);
+
   const user = `Client: ${args.clientName}
-Voice: ${args.voiceProfile}
+
+${voiceBlock}
 
 Event: ${args.event}
 
@@ -38,6 +43,7 @@ export async function generatePosts(args: {
   angle: string;
   clientName: string;
   voiceProfile: string;
+  voiceExamples?: VoiceExample[];
   platform: 'x' | 'thread' | 'reply';
 }): Promise<string[]> {
   const platformGuide = {
@@ -52,9 +58,11 @@ Output JSON only: {"posts": ["...", "...", "..."]}
 
 Generate 3 distinct variants.`;
 
+  const voiceBlock = composeVoiceBlock(args.voiceProfile || '', args.voiceExamples || []);
+
   const user = `Client: ${args.clientName}
-Voice profile and examples:
-${args.voiceProfile}
+
+${voiceBlock}
 
 Event: ${args.event}
 Angle: ${args.angle}

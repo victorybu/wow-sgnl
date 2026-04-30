@@ -1,5 +1,6 @@
 import { sql } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
+import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,7 +20,15 @@ export default async function Clients() {
       <div className="space-y-4 mb-8">
         {clients.rows.map((c: any) => (
           <div key={c.id} className="border border-neutral-800 rounded p-4">
-            <h2 className="font-bold">{c.name}</h2>
+            <div className="flex justify-between items-start gap-3">
+              <h2 className="font-bold">{c.name}</h2>
+              <Link
+                href={`/voice?client_id=${c.id}`}
+                className="text-xs px-2 py-1 rounded border border-neutral-700 hover:border-neutral-500 shrink-0"
+              >
+                Voice loop →
+              </Link>
+            </div>
             <p className="text-xs opacity-60 mt-1">Topics: {c.priority_topics}</p>
             <p className="text-xs opacity-60 mt-1 line-clamp-2">Voice: {c.voice_profile}</p>
           </div>

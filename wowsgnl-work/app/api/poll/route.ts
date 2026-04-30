@@ -2,6 +2,7 @@ import { sql } from '@/lib/db';
 import { fetchUserTweets, searchTweets } from '@/lib/twitterapi';
 import { scoreRelevance } from '@/lib/relevance';
 import { generateAngles } from '@/lib/drafts';
+import { getActiveVoiceExamples } from '@/lib/voice';
 import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
@@ -88,7 +89,7 @@ export async function GET() {
   // that don't yet have any drafts, posted in the last 6 hours, not muted.
   // Surfaces ready-to-pick angles on the homepage hero on next refresh.
   const topPicks = await sql`
-    SELECT e.id, e.content, c.name AS client_name, c.voice_profile
+    SELECT e.id, e.content, e.client_id, c.name AS client_name, c.voice_profile
     FROM events e JOIN clients c ON c.id = e.client_id
     WHERE e.relevance_score >= 7
       AND (e.feedback IS DISTINCT FROM 'noise')
@@ -100,10 +101,12 @@ export async function GET() {
   let auto_angled = 0;
   for (const ev of topPicks.rows) {
     try {
+      const voiceExamples = await getActiveVoiceExamples(ev.client_id, 8);
       const angles = await generateAngles({
         event: ev.content,
         clientName: ev.client_name,
         voiceProfile: ev.voice_profile || '',
+        voiceExamples,
       });
       for (const a of angles) {
         await sql`INSERT INTO drafts (event_id, angle, platform) VALUES (${ev.id}, ${a}, 'x')`;

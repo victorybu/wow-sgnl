@@ -1,5 +1,6 @@
 import { sql } from '@/lib/db';
 import { NextResponse } from 'next/server';
+import { addShippedPostExample, unshipPostExample } from '@/lib/voice';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -25,20 +26,35 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   if (typeof body.shipped === 'boolean') {
     if (body.shipped) {
       await sql`UPDATE posts SET shipped = TRUE, shipped_at = NOW() WHERE id = ${id}`;
-      // Cascade: mark parent draft + event as shipped
+      // Cascade: mark parent draft + event as shipped, AND capture voice example.
       const r = await sql`
-        SELECT d.id AS draft_id, d.event_id
-        FROM posts p JOIN drafts d ON d.id = p.draft_id
+        SELECT p.id AS post_id, p.content, p.original_content,
+               d.id AS draft_id, d.angle, d.event_id,
+               e.content AS event_content, e.client_id
+        FROM posts p
+        JOIN drafts d ON d.id = p.draft_id
+        JOIN events e ON e.id = d.event_id
         WHERE p.id = ${id}
       `;
       const meta = r.rows[0];
       if (meta) {
         await sql`UPDATE drafts SET shipped = TRUE, shipped_at = NOW() WHERE id = ${meta.draft_id}`;
         await sql`UPDATE events SET status = 'shipped' WHERE id = ${meta.event_id}`;
+        // Voice loop: shipped post becomes a curated voice example.
+        await addShippedPostExample({
+          clientId: meta.client_id,
+          postId: meta.post_id,
+          eventId: meta.event_id,
+          finalContent: meta.content,
+          originalDraft: meta.original_content,
+          context: meta.event_content,
+          angle: meta.angle,
+        });
       }
     } else {
       await sql`UPDATE posts SET shipped = FALSE, shipped_at = NULL WHERE id = ${id}`;
-      // Cascade: if no other posts under this event are shipped, revert event status to 'drafted'
+      // Voice loop: unshipping zero-weights the example (keeps row for audit).
+      await unshipPostExample(id);
       const r = await sql`
         SELECT d.id AS draft_id, d.event_id,
                (SELECT COUNT(*)::int FROM posts p2
@@ -51,7 +67,6 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       if (meta) {
         if (meta.shipped_post_count === 0) {
           await sql`UPDATE events SET status = 'drafted' WHERE id = ${meta.event_id} AND status = 'shipped'`;
-          // also clear drafts.shipped if no posts under it are shipped
           await sql`
             UPDATE drafts SET shipped = FALSE, shipped_at = NULL
             WHERE id = ${meta.draft_id}

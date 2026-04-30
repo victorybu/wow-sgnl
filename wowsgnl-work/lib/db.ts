@@ -101,4 +101,24 @@ export async function initSchema() {
   await sql`CREATE INDEX IF NOT EXISTS ratings_history_event_idx ON ratings_history(event_id);`;
   await sql`CREATE INDEX IF NOT EXISTS ratings_history_target_idx ON ratings_history(kind, target_id);`;
   await sql`CREATE INDEX IF NOT EXISTS ratings_history_rated_at_idx ON ratings_history(rated_at DESC);`;
+  await sql`ALTER TABLE posts ADD COLUMN IF NOT EXISTS original_content TEXT`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS voice_examples (
+      id SERIAL PRIMARY KEY,
+      client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,
+      source TEXT NOT NULL,
+      source_post_id INTEGER REFERENCES posts(id) ON DELETE SET NULL,
+      source_event_id INTEGER REFERENCES events(id) ON DELETE SET NULL,
+      content TEXT NOT NULL,
+      context TEXT,
+      angle TEXT,
+      original_draft TEXT,
+      was_edited BOOLEAN DEFAULT FALSE,
+      weight INTEGER DEFAULT 1,
+      notes TEXT,
+      added_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS voice_examples_client_idx ON voice_examples(client_id, weight DESC, added_at DESC);`;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS voice_examples_unique_post ON voice_examples(source_post_id) WHERE source_post_id IS NOT NULL;`;
 }

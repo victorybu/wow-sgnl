@@ -1,5 +1,6 @@
 import { sql } from '@/lib/db';
 import { generateAngles, generatePosts } from '@/lib/drafts';
+import { getActiveVoiceExamples } from '@/lib/voice';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
@@ -22,10 +23,12 @@ async function genAngles(eventId: number) {
       WHERE e.id = ${eventId}
     `;
     const ev = e.rows[0];
+    const voiceExamples = await getActiveVoiceExamples(ev.client_id, 8);
     const angles = await generateAngles({
       event: ev.content,
       clientName: ev.client_name,
       voiceProfile: ev.voice_profile || '',
+      voiceExamples,
     });
     for (const a of angles) {
       await sql`INSERT INTO drafts (event_id, angle, platform) VALUES (${eventId}, ${a}, 'x')`;
@@ -43,23 +46,27 @@ async function genPosts(draftId: number) {
   let evId: number | null = null;
   try {
     const d = await sql`
-      SELECT d.*, e.id AS event_id, e.content as event_content, c.name as client_name, c.voice_profile
+      SELECT d.*, e.id AS event_id, e.client_id, e.content as event_content, c.name as client_name, c.voice_profile
       FROM drafts d JOIN events e ON e.id = d.event_id JOIN clients c ON c.id = e.client_id
       WHERE d.id = ${draftId}
     `;
     const dr = d.rows[0];
     evId = dr.event_id;
+    const voiceExamples = await getActiveVoiceExamples(dr.client_id, 8);
     const variants = await generatePosts({
       event: dr.event_content,
       angle: dr.angle,
       clientName: dr.client_name,
       voiceProfile: dr.voice_profile || '',
+      voiceExamples,
       platform: 'x',
     });
     for (let i = 0; i < variants.length; i++) {
+      // Capture both initial and editable content; original_content stays
+      // immutable so we can compute the user's edits later (voice signal).
       await sql`
-        INSERT INTO posts (draft_id, position, content, platform)
-        VALUES (${draftId}, ${i}, ${variants[i]}, 'x')
+        INSERT INTO posts (draft_id, position, content, original_content, platform)
+        VALUES (${draftId}, ${i}, ${variants[i]}, ${variants[i]}, 'x')
       `;
     }
     revalidatePath(`/event/${dr.event_id}`);

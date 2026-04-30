@@ -207,6 +207,7 @@ export default function Home() {
           </Link>
           <Link href="/drafts" className="underline">Drafts</Link>
           <Link href="/ratings" className="underline">Ratings</Link>
+          <Link href="/voice" className="underline">Voice</Link>
           <Link href="/watchlist" className="underline">Watchlist</Link>
           <Link href="/clients" className="underline">Clients</Link>
           <Link href="/run" className="underline opacity-60">debug</Link>
