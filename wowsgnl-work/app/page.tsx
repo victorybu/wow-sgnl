@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 
-type Filter = 'all' | 'unscored' | 'top' | 'drafted' | 'shipped';
+type Filter = 'all' | 'unscored' | 'top' | 'drafted' | 'shipped' | 'my_ratings';
+type Rating = 'signal' | 'noise' | null;
 
 type EventRow = {
   id: number;
@@ -15,6 +16,10 @@ type EventRow = {
   status: string;
   posted_at: string | null;
   created_at: string;
+  feedback: 'signal' | 'noise' | null;
+  feedback_at: string | null;
+  feedback_reason: string | null;
+  feedback_note: string | null;
   client_name: string;
   has_drafts: boolean;
   is_shipped: boolean;
@@ -31,6 +36,9 @@ type Payload = {
     shipped_today: number;
     events_total: number;
     events_unscored: number;
+    rated_today: number;
+    rated_today_signal: number;
+    rated_today_noise: number;
   };
   counts: {
     all: number;
@@ -38,8 +46,29 @@ type Payload = {
     top: number;
     drafted: number;
     shipped: number;
+    my_ratings: number;
   };
 };
+
+const SIGNAL_REASONS = [
+  'Ship-worthy now',
+  'Good context',
+  'Worth drafting against',
+  'Just interesting',
+  'Aligns with Khanna lanes',
+  'Surprising/contrarian',
+];
+
+const NOISE_REASONS = [
+  'Wrong topic',
+  'Off-tone for Khanna',
+  'Stale/already covered',
+  'Too generic',
+  'Off-message',
+  'Wrong messenger',
+  'RT-style content',
+  'Cheerleading/booking bait',
+];
 
 function timeAgo(iso: string | null): string {
   if (!iso) return '';
@@ -66,6 +95,7 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: 'all', label: 'All events' },
   { id: 'top', label: '7+ only' },
   { id: 'unscored', label: 'Unscored' },
+  { id: 'my_ratings', label: 'My ratings' },
   { id: 'drafted', label: 'Drafted' },
   { id: 'shipped', label: 'Shipped' },
 ];
@@ -99,6 +129,32 @@ export default function Home() {
     return () => clearInterval(id);
   }, [filter]);
 
+  const onLocalRated = (eventId: number, next: Partial<EventRow>) => {
+    setData(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        events: prev.events.map(e => (e.id === eventId ? { ...e, ...next } : e)),
+      };
+    });
+  };
+
+  const emptyMsg = (() => {
+    if (!data) return null;
+    if (filter === 'top') {
+      return data.stats.events_unscored > 0
+        ? `${data.stats.events_unscored} events are still waiting to be scored — once Anthropic billing clears, the next poll will fill them in.`
+        : 'No events scored ≥7 yet.';
+    }
+    if (filter === 'my_ratings') return 'No ratings yet — click 👍 or 👎 on any card to start.';
+    if (filter === 'drafted') return 'No events drafted yet — click "Draft posts" on any card.';
+    if (filter === 'shipped') return 'No drafts shipped yet.';
+    if (filter === 'unscored') return 'All events scored! (Or no events yet.)';
+    return data.stats.events_total === 0
+      ? 'No events yet — first poll runs at the next top of hour.'
+      : null;
+  })();
+
   return (
     <main className="max-w-5xl mx-auto p-6">
       <div className="flex justify-between items-center mb-4">
@@ -113,15 +169,21 @@ export default function Home() {
         <div className="space-x-4 text-xs">
           <Link href="/watchlist" className="underline">Watchlist</Link>
           <Link href="/clients" className="underline">Clients</Link>
+          <Link href="/ratings" className="underline">Ratings</Link>
           <Link href="/run" className="underline opacity-60">debug</Link>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
         <Stat label="Events today" value={data?.stats.events_today ?? '—'} sub={data ? `${data.stats.events_total} total` : ''} />
         <Stat label="Scored today" value={data?.stats.scored_today ?? '—'} sub={data ? `${data.stats.events_unscored} unscored` : ''} />
         <Stat label="Drafts in progress" value={data?.stats.drafts_in_progress ?? '—'} />
         <Stat label="Shipped today" value={data?.stats.shipped_today ?? '—'} />
+        <Stat
+          label="Rated today"
+          value={data?.stats.rated_today ?? '—'}
+          sub={data ? `${data.stats.rated_today_signal} 👍 / ${data.stats.rated_today_noise} 👎` : ''}
+        />
       </div>
 
       <div className="flex flex-wrap gap-2 mb-6">
@@ -153,72 +215,13 @@ export default function Home() {
 
       {loading && !data && <p className="opacity-50 text-sm">Loading…</p>}
 
-      {data && data.events.length === 0 && (
-        <p className="opacity-50 text-sm">
-          No events match this filter yet.
-          {data.stats.events_unscored > 0 && (
-            <span> {data.stats.events_unscored} events are still waiting to be scored — once Anthropic billing clears, the next poll will fill them in.</span>
-          )}
-        </p>
+      {data && data.events.length === 0 && emptyMsg && (
+        <p className="opacity-50 text-sm">{emptyMsg}</p>
       )}
 
       <div className="space-y-3">
         {data?.events.map(e => (
-          <article key={e.id} className="border border-neutral-800 rounded-lg p-4 hover:border-neutral-600 transition">
-            <header className="flex justify-between items-start gap-3 mb-2">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className={`text-xs font-bold px-2 py-0.5 rounded ${scoreClass(e.relevance_score)}`}>
-                  {e.relevance_score === null ? 'pending' : `${e.relevance_score}/10`}
-                </span>
-                {e.author && (
-                  <a
-                    href={`https://x.com/${e.author}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm opacity-80 hover:opacity-100 hover:underline"
-                  >
-                    @{e.author}
-                  </a>
-                )}
-                <span className="text-xs opacity-40">·</span>
-                <span className="text-xs opacity-50">{e.client_name}</span>
-                <span className="text-xs opacity-40">·</span>
-                <span className="text-xs opacity-50">{timeAgo(e.posted_at || e.created_at)}</span>
-                {e.is_shipped && (
-                  <span className="text-xs px-1.5 py-0.5 rounded bg-green-500/20 text-green-300 border border-green-500/40">
-                    shipped
-                  </span>
-                )}
-                {e.has_drafts && !e.is_shipped && (
-                  <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-500/40">
-                    drafted
-                  </span>
-                )}
-              </div>
-            </header>
-            <p className="text-sm whitespace-pre-wrap mb-3 leading-relaxed">{e.content}</p>
-            {e.relevance_reason && (
-              <p className="text-xs opacity-60 italic mb-3">{e.relevance_reason}</p>
-            )}
-            <div className="flex items-center gap-2">
-              {e.url && (
-                <a
-                  href={e.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs px-3 py-1.5 rounded border border-neutral-700 hover:border-neutral-500"
-                >
-                  Open on X
-                </a>
-              )}
-              <Link
-                href={`/event/${e.id}`}
-                className="text-xs px-3 py-1.5 rounded bg-white text-black font-medium hover:bg-neutral-200"
-              >
-                Draft posts
-              </Link>
-            </div>
-          </article>
+          <EventCard key={e.id} event={e} onLocalRated={onLocalRated} />
         ))}
       </div>
     </main>
@@ -232,5 +235,209 @@ function Stat({ label, value, sub }: { label: string; value: number | string; su
       <div className="text-2xl font-bold tabular-nums">{value}</div>
       {sub && <div className="text-xs opacity-40 mt-1">{sub}</div>}
     </div>
+  );
+}
+
+function EventCard({
+  event: e,
+  onLocalRated,
+}: {
+  event: EventRow;
+  onLocalRated: (id: number, next: Partial<EventRow>) => void;
+}) {
+  const [formOpen, setFormOpen] = useState<Rating>(null);
+  const [reason, setReason] = useState<string>('');
+  const [note, setNote] = useState<string>('');
+  const [saving, setSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const openForm = (rating: 'signal' | 'noise') => {
+    setReason(e.feedback === rating ? e.feedback_reason || '' : '');
+    setNote(e.feedback === rating ? e.feedback_note || '' : '');
+    setErrorMsg(null);
+    setFormOpen(rating);
+  };
+
+  const closeForm = () => {
+    setFormOpen(null);
+    setErrorMsg(null);
+  };
+
+  const submit = async (rating: Rating) => {
+    setSaving(true);
+    setErrorMsg(null);
+    try {
+      const res = await fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          event_id: e.id,
+          rating,
+          reason: rating ? reason || null : null,
+          note: rating ? note || null : null,
+        }),
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      const j = await res.json();
+      onLocalRated(e.id, {
+        feedback: j.event.feedback,
+        feedback_at: j.event.feedback_at,
+        feedback_reason: j.event.feedback_reason,
+        feedback_note: j.event.feedback_note,
+      });
+      closeForm();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'save failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleClick = (rating: 'signal' | 'noise') => {
+    if (e.feedback === rating) {
+      submit(null); // unrate
+    } else {
+      openForm(rating);
+    }
+  };
+
+  const reasonOpts = formOpen === 'signal' ? SIGNAL_REASONS : NOISE_REASONS;
+
+  return (
+    <article className="border border-neutral-800 rounded-lg p-4 hover:border-neutral-600 transition">
+      <header className="flex justify-between items-start gap-3 mb-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className={`text-xs font-bold px-2 py-0.5 rounded ${scoreClass(e.relevance_score)}`}>
+            {e.relevance_score === null ? 'pending' : `${e.relevance_score}/10`}
+          </span>
+          {e.author && (
+            <a
+              href={`https://x.com/${e.author}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm opacity-80 hover:opacity-100 hover:underline"
+            >
+              @{e.author}
+            </a>
+          )}
+          <span className="text-xs opacity-40">·</span>
+          <span className="text-xs opacity-50">{e.client_name}</span>
+          <span className="text-xs opacity-40">·</span>
+          <span className="text-xs opacity-50">{timeAgo(e.posted_at || e.created_at)}</span>
+          {e.is_shipped && (
+            <span className="text-xs px-1.5 py-0.5 rounded bg-green-500/20 text-green-300 border border-green-500/40">
+              shipped
+            </span>
+          )}
+          {e.has_drafts && !e.is_shipped && (
+            <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-500/40">
+              drafted
+            </span>
+          )}
+        </div>
+      </header>
+      <p className="text-sm whitespace-pre-wrap mb-3 leading-relaxed">{e.content}</p>
+      {e.relevance_reason && (
+        <p className="text-xs opacity-60 italic mb-3">{e.relevance_reason}</p>
+      )}
+
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          onClick={() => handleClick('signal')}
+          disabled={saving}
+          className={`text-xs px-3 py-1.5 rounded border transition ${
+            e.feedback === 'signal'
+              ? 'bg-green-500/20 border-green-500/60 text-green-200'
+              : 'border-neutral-700 hover:border-green-500/50'
+          }`}
+        >
+          👍 Signal
+        </button>
+        <button
+          onClick={() => handleClick('noise')}
+          disabled={saving}
+          className={`text-xs px-3 py-1.5 rounded border transition ${
+            e.feedback === 'noise'
+              ? 'bg-red-500/20 border-red-500/60 text-red-200'
+              : 'border-neutral-700 hover:border-red-500/50'
+          }`}
+        >
+          👎 Noise
+        </button>
+        <span className="flex-1" />
+        {e.url && (
+          <a
+            href={e.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs px-3 py-1.5 rounded border border-neutral-700 hover:border-neutral-500"
+          >
+            Open on X
+          </a>
+        )}
+        <Link
+          href={`/event/${e.id}`}
+          className="text-xs px-3 py-1.5 rounded bg-white text-black font-medium hover:bg-neutral-200"
+        >
+          Draft posts
+        </Link>
+      </div>
+
+      {e.feedback && !formOpen && (
+        <div className="mt-3 text-xs opacity-70">
+          marked <span className={e.feedback === 'signal' ? 'text-green-300' : 'text-red-300'}>{e.feedback}</span>
+          {e.feedback_reason ? <> — {e.feedback_reason}</> : null}
+          {e.feedback_note && (
+            <div className="mt-1 text-xs opacity-60 italic">"{e.feedback_note}"</div>
+          )}
+        </div>
+      )}
+
+      {formOpen && (
+        <div className="mt-3 border-t border-neutral-800 pt-3 space-y-2">
+          <div className="text-xs opacity-70">
+            Rate as <strong className={formOpen === 'signal' ? 'text-green-300' : 'text-red-300'}>{formOpen}</strong>
+            {e.feedback === formOpen && <span className="opacity-50"> — editing existing rating</span>}
+          </div>
+          <select
+            value={reason}
+            onChange={ev => setReason(ev.target.value)}
+            className="w-full bg-neutral-900 border border-neutral-700 rounded px-3 py-2 text-xs"
+          >
+            <option value="">Reason (optional)</option>
+            {reasonOpts.map(r => (
+              <option key={r} value={r}>{r}</option>
+            ))}
+          </select>
+          <textarea
+            value={note}
+            onChange={ev => setNote(ev.target.value.slice(0, 280))}
+            rows={2}
+            placeholder="Optional note — anything Claude should learn from this rating"
+            className="w-full bg-neutral-900 border border-neutral-700 rounded px-3 py-2 text-xs"
+          />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => submit(formOpen)}
+              disabled={saving}
+              className="text-xs px-3 py-1.5 rounded bg-white text-black font-medium disabled:opacity-50"
+            >
+              {saving ? 'Saving…' : 'Save rating'}
+            </button>
+            <button
+              onClick={closeForm}
+              disabled={saving}
+              className="text-xs px-3 py-1.5 rounded border border-neutral-700 hover:border-neutral-500"
+            >
+              Cancel
+            </button>
+            <span className="text-xs opacity-40 ml-auto">{note.length}/280</span>
+          </div>
+          {errorMsg && (
+            <div className="text-xs text-red-300">save error: {errorMsg}</div>
+          )}
+        </div>
+      )}
+    </article>
   );
 }

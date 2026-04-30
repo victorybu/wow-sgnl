@@ -22,6 +22,7 @@ export async function fetchUserTweets(username: string, sinceMinutes = 1440) {
   const tweets = data.tweets || data.data?.tweets || [];
   const cutoff = Date.now() - sinceMinutes * 60_000;
   return tweets.filter((t: any) => {
+    if ((t.text || '').startsWith('RT @')) return false;
     const ts = parseTweetDate(t.createdAt);
     return ts === 0 || ts > cutoff; // keep if unparseable, just in case
   });
@@ -40,6 +41,7 @@ export async function searchTweets(query: string, sinceMinutes = 1440) {
   const tweets = data.tweets || data.data?.tweets || [];
   const cutoff = Date.now() - sinceMinutes * 60_000;
   return tweets.filter((t: any) => {
+    if ((t.text || '').startsWith('RT @')) return false;
     const ts = parseTweetDate(t.createdAt);
     return ts === 0 || ts > cutoff;
   });

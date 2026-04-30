@@ -57,4 +57,20 @@ export async function initSchema() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
   `;
+  await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS feedback TEXT`;
+  await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS feedback_at TIMESTAMPTZ`;
+  await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS feedback_reason TEXT`;
+  await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS feedback_note TEXT`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS ratings_history (
+      id SERIAL PRIMARY KEY,
+      event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
+      rating TEXT NOT NULL,
+      reason TEXT,
+      note TEXT,
+      rated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS ratings_history_event_idx ON ratings_history(event_id);`;
+  await sql`CREATE INDEX IF NOT EXISTS ratings_history_rated_at_idx ON ratings_history(rated_at DESC);`;
 }
