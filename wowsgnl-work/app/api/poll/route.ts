@@ -8,9 +8,6 @@ export const revalidate = 0;
 export const fetchCache = 'force-no-store';
 export const maxDuration = 300;
 
-const TWITTERAPI_DELAY_MS = 5500;
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-
 export async function GET() {
   const errors: string[] = [];
   const debug: any = { watchlist_count: 0, fetched_per_watcher: [], unscored_count: 0 };
@@ -27,11 +24,8 @@ export async function GET() {
   let inserted = 0;
   let scored = 0;
 
-  let firstFetch = true;
   for (const w of watchlist.rows) {
     try {
-      if (!firstFetch) await sleep(TWITTERAPI_DELAY_MS);
-      firstFetch = false;
       let tweets: any[] = [];
       if (w.kind === 'x_account') tweets = await fetchUserTweets(w.value);
       else if (w.kind === 'x_keyword') tweets = await searchTweets(w.value);
