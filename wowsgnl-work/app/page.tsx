@@ -201,7 +201,10 @@ export default function Home() {
             </span>
           )}
         </div>
-        <div className="space-x-4 text-xs">
+        <div className="flex items-center gap-3 text-xs">
+          <Link href="/triage" className="px-3 py-1.5 rounded bg-white text-black font-medium hover:bg-neutral-200">
+            Triage{data && data.stats.events_unscored !== undefined ? ` · ${data.counts.all - data.counts.my_ratings}` : ''}
+          </Link>
           <Link href="/drafts" className="underline">Drafts</Link>
           <Link href="/ratings" className="underline">Ratings</Link>
           <Link href="/watchlist" className="underline">Watchlist</Link>
