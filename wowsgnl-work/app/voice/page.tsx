@@ -117,6 +117,17 @@ export default function VoicePage() {
   if (loading) return <main className="max-w-4xl mx-auto p-6"><p className="opacity-50">Loading…</p></main>;
   if (error) return <main className="max-w-4xl mx-auto p-6"><p className="text-red-300">{error}</p></main>;
   if (!data) return null;
+  if ((data.client as any).mode === 'intelligence') {
+    return (
+      <main className="max-w-4xl mx-auto p-6">
+        <Link href="/" className="text-xs underline opacity-60">← back to feed</Link>
+        <div className="mt-6 border border-purple-500/30 bg-purple-500/5 rounded-lg p-4 text-sm">
+          <p className="font-medium mb-1">{data.client.name} is an intelligence-mode client.</p>
+          <p className="opacity-80">No voice loop — drafting is disabled. Visit <Link href="/briefing" className="underline">/briefing</Link> instead.</p>
+        </div>
+      </main>
+    );
+  }
 
   const active = data.examples.filter(e => e.weight > 0);
   const excluded = data.examples.filter(e => e.weight === 0);

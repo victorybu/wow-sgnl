@@ -48,6 +48,7 @@ function scoreClass(s: number | null) {
 
 export default function DraftsPage() {
   const [drafts, setDrafts] = useState<DraftRow[]>([]);
+  const [client, setClient] = useState<{ id: number; name: string; mode: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
@@ -60,6 +61,7 @@ export default function DraftsPage() {
         if (!res.ok) throw new Error(`${res.status}`);
         const j = await res.json();
         setDrafts(j.drafts);
+        setClient(j.current_client || null);
       } catch (e: any) {
         setError(e.message);
       } finally {
@@ -120,10 +122,25 @@ export default function DraftsPage() {
     { id: 'noise', label: '👎 angle' },
   ];
 
+  if (client && client.mode === 'intelligence') {
+    return (
+      <main className="max-w-3xl mx-auto p-6">
+        <Link href="/" className="text-xs underline opacity-60">← back to feed</Link>
+        <div className="mt-6 border border-purple-500/30 bg-purple-500/5 rounded-lg p-4 text-sm">
+          <p className="font-medium mb-1">Drafts not applicable for {client.name}.</p>
+          <p className="opacity-80">
+            {client.name} is an intelligence-mode client — no drafting flow.
+            Visit <Link href="/briefing" className="underline">/briefing</Link> for the digest view.
+          </p>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="max-w-5xl mx-auto p-6">
       <div className="flex justify-between items-center mb-4">
-        <h1 className="text-2xl font-bold">Drafts</h1>
+        <h1 className="text-2xl font-bold">Drafts {client && <span className="opacity-50 text-sm font-normal">· {client.name}</span>}</h1>
         <div className="space-x-4 text-xs">
           <Link href="/" className="underline">← back to feed</Link>
           <Link href="/ratings" className="underline opacity-60">Ratings</Link>

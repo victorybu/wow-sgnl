@@ -1,4 +1,5 @@
 import { sql } from '@/lib/db';
+import { getCurrentClient } from '@/lib/clients';
 import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
@@ -10,6 +11,12 @@ type Filter = 'all' | 'unscored' | 'top' | 'drafted' | 'shipped' | 'my_ratings' 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const filter = (searchParams.get('filter') || 'all') as Filter;
+
+  const client = await getCurrentClient();
+  if (!client) {
+    return NextResponse.json({ ok: false, error: 'no clients configured' }, { status: 404 });
+  }
+  const cid = client.id;
 
   let events: any[] = [];
 
@@ -23,7 +30,8 @@ export async function GET(req: Request) {
              EXISTS(SELECT 1 FROM drafts d WHERE d.event_id = e.id AND d.shipped = TRUE) AS is_shipped
       FROM events e
       JOIN clients c ON c.id = e.client_id
-      WHERE EXISTS(SELECT 1 FROM drafts d WHERE d.event_id = e.id AND d.shipped = TRUE)
+      WHERE e.client_id = ${cid}
+        AND EXISTS(SELECT 1 FROM drafts d WHERE d.event_id = e.id AND d.shipped = TRUE)
       ORDER BY e.relevance_score DESC NULLS LAST, e.posted_at DESC NULLS LAST, e.created_at DESC
       LIMIT 200
     `;
@@ -38,7 +46,8 @@ export async function GET(req: Request) {
              EXISTS(SELECT 1 FROM drafts d WHERE d.event_id = e.id AND d.shipped = TRUE) AS is_shipped
       FROM events e
       JOIN clients c ON c.id = e.client_id
-      WHERE e.status = 'drafted'
+      WHERE e.client_id = ${cid}
+        AND e.status = 'drafted'
       ORDER BY e.relevance_score DESC NULLS LAST, e.posted_at DESC NULLS LAST, e.created_at DESC
       LIMIT 200
     `;
@@ -53,7 +62,8 @@ export async function GET(req: Request) {
              EXISTS(SELECT 1 FROM drafts d WHERE d.event_id = e.id AND d.shipped = TRUE) AS is_shipped
       FROM events e
       JOIN clients c ON c.id = e.client_id
-      WHERE e.relevance_score >= 7
+      WHERE e.client_id = ${cid}
+        AND e.relevance_score >= 7
         AND (e.feedback IS DISTINCT FROM 'noise')
       ORDER BY (e.feedback = 'signal') DESC NULLS LAST,
                e.relevance_score DESC, e.posted_at DESC NULLS LAST, e.created_at DESC
@@ -70,7 +80,8 @@ export async function GET(req: Request) {
              EXISTS(SELECT 1 FROM drafts d WHERE d.event_id = e.id AND d.shipped = TRUE) AS is_shipped
       FROM events e
       JOIN clients c ON c.id = e.client_id
-      WHERE e.relevance_score IS NULL
+      WHERE e.client_id = ${cid}
+        AND e.relevance_score IS NULL
         AND (e.feedback IS DISTINCT FROM 'noise')
       ORDER BY (e.feedback = 'signal') DESC NULLS LAST,
                e.posted_at DESC NULLS LAST, e.created_at DESC
@@ -87,7 +98,8 @@ export async function GET(req: Request) {
              EXISTS(SELECT 1 FROM drafts d WHERE d.event_id = e.id AND d.shipped = TRUE) AS is_shipped
       FROM events e
       JOIN clients c ON c.id = e.client_id
-      WHERE e.feedback IS NOT NULL
+      WHERE e.client_id = ${cid}
+        AND e.feedback IS NOT NULL
       ORDER BY e.feedback_at DESC NULLS LAST, e.id DESC
       LIMIT 200
     `;
@@ -102,7 +114,8 @@ export async function GET(req: Request) {
              EXISTS(SELECT 1 FROM drafts d WHERE d.event_id = e.id AND d.shipped = TRUE) AS is_shipped
       FROM events e
       JOIN clients c ON c.id = e.client_id
-      WHERE e.feedback = 'noise'
+      WHERE e.client_id = ${cid}
+        AND e.feedback = 'noise'
       ORDER BY e.feedback_at DESC NULLS LAST, e.id DESC
       LIMIT 200
     `;
@@ -118,7 +131,8 @@ export async function GET(req: Request) {
              EXISTS(SELECT 1 FROM drafts d WHERE d.event_id = e.id AND d.shipped = TRUE) AS is_shipped
       FROM events e
       JOIN clients c ON c.id = e.client_id
-      WHERE (e.feedback IS DISTINCT FROM 'noise')
+      WHERE e.client_id = ${cid}
+        AND (e.feedback IS DISTINCT FROM 'noise')
       ORDER BY (e.feedback = 'signal') DESC NULLS LAST,
                e.relevance_score DESC NULLS LAST,
                e.posted_at DESC NULLS LAST,
@@ -133,61 +147,85 @@ export async function GET(req: Request) {
       SELECT (date_trunc('day', now() AT TIME ZONE 'America/New_York')) AT TIME ZONE 'America/New_York' AS ts
     )
     SELECT
-      (SELECT COUNT(*)::int FROM events WHERE created_at >= (SELECT ts FROM today_start)) AS events_today,
-      (SELECT COUNT(*)::int FROM events WHERE created_at >= (SELECT ts FROM today_start) AND relevance_score IS NOT NULL) AS scored_today,
-      (SELECT COUNT(*)::int FROM events WHERE status = 'drafted') AS drafts_in_progress,
-      (SELECT COUNT(*)::int FROM drafts WHERE shipped = TRUE AND shipped_at >= (SELECT ts FROM today_start)) AS shipped_today,
-      (SELECT COUNT(*)::int FROM events) AS events_total,
-      (SELECT COUNT(*)::int FROM events WHERE relevance_score IS NULL) AS events_unscored,
-      (SELECT COUNT(*)::int FROM ratings_history WHERE rated_at >= (SELECT ts FROM today_start) AND rating IN ('signal','noise')) AS rated_today,
-      (SELECT COUNT(*)::int FROM ratings_history WHERE rated_at >= (SELECT ts FROM today_start) AND rating = 'signal') AS rated_today_signal,
-      (SELECT COUNT(*)::int FROM ratings_history WHERE rated_at >= (SELECT ts FROM today_start) AND rating = 'noise') AS rated_today_noise
+      (SELECT COUNT(*)::int FROM events WHERE client_id = ${cid} AND created_at >= (SELECT ts FROM today_start)) AS events_today,
+      (SELECT COUNT(*)::int FROM events WHERE client_id = ${cid} AND created_at >= (SELECT ts FROM today_start) AND relevance_score IS NOT NULL) AS scored_today,
+      (SELECT COUNT(*)::int FROM events WHERE client_id = ${cid} AND status = 'drafted') AS drafts_in_progress,
+      (SELECT COUNT(*)::int FROM drafts d JOIN events e ON e.id = d.event_id
+        WHERE e.client_id = ${cid} AND d.shipped = TRUE AND d.shipped_at >= (SELECT ts FROM today_start)) AS shipped_today,
+      (SELECT COUNT(*)::int FROM events WHERE client_id = ${cid}) AS events_total,
+      (SELECT COUNT(*)::int FROM events WHERE client_id = ${cid} AND relevance_score IS NULL) AS events_unscored,
+      (SELECT COUNT(*)::int FROM ratings_history h
+        WHERE h.rated_at >= (SELECT ts FROM today_start)
+          AND h.rating IN ('signal','noise')
+          AND ((h.kind = 'event' AND h.target_id IN (SELECT id FROM events WHERE client_id = ${cid}))
+            OR (h.kind = 'draft' AND h.target_id IN (SELECT d.id FROM drafts d JOIN events e ON e.id = d.event_id WHERE e.client_id = ${cid}))
+            OR (h.kind = 'post' AND h.target_id IN (SELECT p.id FROM posts p JOIN drafts d ON d.id = p.draft_id JOIN events e ON e.id = d.event_id WHERE e.client_id = ${cid})))
+      ) AS rated_today,
+      (SELECT COUNT(*)::int FROM ratings_history h
+        WHERE h.rated_at >= (SELECT ts FROM today_start)
+          AND h.rating = 'signal'
+          AND ((h.kind = 'event' AND h.target_id IN (SELECT id FROM events WHERE client_id = ${cid}))
+            OR (h.kind = 'draft' AND h.target_id IN (SELECT d.id FROM drafts d JOIN events e ON e.id = d.event_id WHERE e.client_id = ${cid}))
+            OR (h.kind = 'post' AND h.target_id IN (SELECT p.id FROM posts p JOIN drafts d ON d.id = p.draft_id JOIN events e ON e.id = d.event_id WHERE e.client_id = ${cid})))
+      ) AS rated_today_signal,
+      (SELECT COUNT(*)::int FROM ratings_history h
+        WHERE h.rated_at >= (SELECT ts FROM today_start)
+          AND h.rating = 'noise'
+          AND ((h.kind = 'event' AND h.target_id IN (SELECT id FROM events WHERE client_id = ${cid}))
+            OR (h.kind = 'draft' AND h.target_id IN (SELECT d.id FROM drafts d JOIN events e ON e.id = d.event_id WHERE e.client_id = ${cid}))
+            OR (h.kind = 'post' AND h.target_id IN (SELECT p.id FROM posts p JOIN drafts d ON d.id = p.draft_id JOIN events e ON e.id = d.event_id WHERE e.client_id = ${cid})))
+      ) AS rated_today_noise
   `;
 
   const counts = await sql`
     SELECT
-      (SELECT COUNT(*)::int FROM events WHERE feedback IS DISTINCT FROM 'noise') AS all,
-      (SELECT COUNT(*)::int FROM events WHERE relevance_score IS NULL AND feedback IS DISTINCT FROM 'noise') AS unscored,
-      (SELECT COUNT(*)::int FROM events WHERE relevance_score >= 7 AND feedback IS DISTINCT FROM 'noise') AS top,
-      (SELECT COUNT(*)::int FROM events WHERE status = 'drafted') AS drafted,
-      (SELECT COUNT(*)::int FROM events e WHERE EXISTS(SELECT 1 FROM drafts d WHERE d.event_id = e.id AND d.shipped = TRUE)) AS shipped,
-      (SELECT COUNT(*)::int FROM events WHERE feedback IS NOT NULL) AS my_ratings,
-      (SELECT COUNT(*)::int FROM events WHERE feedback = 'noise') AS muted
+      (SELECT COUNT(*)::int FROM events WHERE client_id = ${cid} AND feedback IS DISTINCT FROM 'noise') AS all,
+      (SELECT COUNT(*)::int FROM events WHERE client_id = ${cid} AND relevance_score IS NULL AND feedback IS DISTINCT FROM 'noise') AS unscored,
+      (SELECT COUNT(*)::int FROM events WHERE client_id = ${cid} AND relevance_score >= 7 AND feedback IS DISTINCT FROM 'noise') AS top,
+      (SELECT COUNT(*)::int FROM events WHERE client_id = ${cid} AND status = 'drafted') AS drafted,
+      (SELECT COUNT(*)::int FROM events e WHERE e.client_id = ${cid} AND EXISTS(SELECT 1 FROM drafts d WHERE d.event_id = e.id AND d.shipped = TRUE)) AS shipped,
+      (SELECT COUNT(*)::int FROM events WHERE client_id = ${cid} AND feedback IS NOT NULL) AS my_ratings,
+      (SELECT COUNT(*)::int FROM events WHERE client_id = ${cid} AND feedback = 'noise') AS muted
   `;
 
-  // Top picks: score >= 7, not muted, posted in last 6 hours (≈ last 2 cron pulls
-  // at 3h cadence). Bring drafts inline.
-  const topPicks = await sql`
-    SELECT e.id, e.author, e.content, e.url, e.relevance_score, e.relevance_reason,
-           e.posted_at, e.created_at,
-           e.feedback, e.feedback_at, e.feedback_reason, e.feedback_note,
-           c.name AS client_name,
-           EXISTS(SELECT 1 FROM drafts d WHERE d.event_id = e.id AND d.shipped = TRUE) AS is_shipped,
-           COALESCE(
-             (SELECT json_agg(json_build_object(
-                'id', d.id, 'angle', d.angle,
-                'feedback', d.feedback, 'feedback_reason', d.feedback_reason,
-                'post_count', (SELECT COUNT(*)::int FROM posts p WHERE p.draft_id = d.id),
-                'shipped_count', (SELECT COUNT(*)::int FROM posts p WHERE p.draft_id = d.id AND p.shipped = TRUE)
-              ) ORDER BY d.id ASC)
-              FROM drafts d WHERE d.event_id = e.id),
-             '[]'::json
-           ) AS drafts
-    FROM events e
-    JOIN clients c ON c.id = e.client_id
-    WHERE e.relevance_score >= 7
-      AND (e.feedback IS DISTINCT FROM 'noise')
-      AND COALESCE(e.posted_at, e.created_at) >= NOW() - INTERVAL '6 hours'
-    ORDER BY e.relevance_score DESC, COALESCE(e.posted_at, e.created_at) DESC
-    LIMIT 5
-  `;
+  // Top picks only for drafting-mode clients (intelligence mode has /briefing instead)
+  let topPicks: any[] = [];
+  if (client.mode === 'drafting') {
+    const tp = await sql`
+      SELECT e.id, e.author, e.content, e.url, e.relevance_score, e.relevance_reason,
+             e.posted_at, e.created_at,
+             e.feedback, e.feedback_at, e.feedback_reason, e.feedback_note,
+             c.name AS client_name,
+             EXISTS(SELECT 1 FROM drafts d WHERE d.event_id = e.id AND d.shipped = TRUE) AS is_shipped,
+             COALESCE(
+               (SELECT json_agg(json_build_object(
+                  'id', d.id, 'angle', d.angle,
+                  'feedback', d.feedback, 'feedback_reason', d.feedback_reason,
+                  'post_count', (SELECT COUNT(*)::int FROM posts p WHERE p.draft_id = d.id),
+                  'shipped_count', (SELECT COUNT(*)::int FROM posts p WHERE p.draft_id = d.id AND p.shipped = TRUE)
+                ) ORDER BY d.id ASC)
+                FROM drafts d WHERE d.event_id = e.id),
+               '[]'::json
+             ) AS drafts
+      FROM events e
+      JOIN clients c ON c.id = e.client_id
+      WHERE e.client_id = ${cid}
+        AND e.relevance_score >= 7
+        AND (e.feedback IS DISTINCT FROM 'noise')
+        AND COALESCE(e.posted_at, e.created_at) >= NOW() - INTERVAL '6 hours'
+      ORDER BY e.relevance_score DESC, COALESCE(e.posted_at, e.created_at) DESC
+      LIMIT 5
+    `;
+    topPicks = tp.rows;
+  }
 
   return NextResponse.json({
     ts: new Date().toISOString(),
     filter,
+    current_client: { id: client.id, name: client.name, mode: client.mode },
     events,
     stats: stats.rows[0],
     counts: counts.rows[0],
-    top_picks: topPicks.rows,
+    top_picks: topPicks,
   });
 }

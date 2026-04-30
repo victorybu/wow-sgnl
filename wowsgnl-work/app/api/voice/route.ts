@@ -1,5 +1,6 @@
 import { sql } from '@/lib/db';
 import { composeVoiceBlock, getActiveVoiceExamples } from '@/lib/voice';
+import { getCurrentClient } from '@/lib/clients';
 import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
@@ -7,21 +8,19 @@ export const revalidate = 0;
 export const fetchCache = 'force-no-store';
 
 // GET /api/voice?client_id=N — returns the client's voice profile,
-// all examples, stats, and the live prompt preview.
+// all examples, stats, and the live prompt preview. If client_id
+// not specified, defaults to current cookie client.
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   let clientId = Number(searchParams.get('client_id'));
   if (!Number.isInteger(clientId) || clientId <= 0) {
-    // Default to first client (sole client today).
-    const c = await sql`SELECT id FROM clients ORDER BY id LIMIT 1`;
-    if (c.rows.length === 0) {
-      return NextResponse.json({ ok: false, error: 'no clients' }, { status: 404 });
-    }
-    clientId = c.rows[0].id;
+    const cur = await getCurrentClient();
+    if (!cur) return NextResponse.json({ ok: false, error: 'no clients' }, { status: 404 });
+    clientId = cur.id;
   }
 
   const clientRes = await sql`
-    SELECT id, name, voice_profile, priority_topics
+    SELECT id, name, mode, voice_profile, priority_topics
     FROM clients WHERE id = ${clientId}
   `;
   if (clientRes.rows.length === 0) {

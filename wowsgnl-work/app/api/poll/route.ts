@@ -87,11 +87,12 @@ export async function GET() {
 
   // Top picks: pre-generate angles for up to 5 fresh score>=7 events
   // that don't yet have any drafts, posted in the last 6 hours, not muted.
-  // Surfaces ready-to-pick angles on the homepage hero on next refresh.
+  // Only for drafting-mode clients — intelligence-mode skips drafting entirely.
   const topPicks = await sql`
     SELECT e.id, e.content, e.client_id, c.name AS client_name, c.voice_profile
     FROM events e JOIN clients c ON c.id = e.client_id
-    WHERE e.relevance_score >= 7
+    WHERE c.mode = 'drafting'
+      AND e.relevance_score >= 7
       AND (e.feedback IS DISTINCT FROM 'noise')
       AND COALESCE(e.posted_at, e.created_at) >= NOW() - INTERVAL '6 hours'
       AND NOT EXISTS (SELECT 1 FROM drafts d WHERE d.event_id = e.id)

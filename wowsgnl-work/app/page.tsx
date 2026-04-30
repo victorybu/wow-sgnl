@@ -52,6 +52,7 @@ type TopPick = {
 type Payload = {
   ts: string;
   filter: Filter;
+  current_client: { id: number; name: string; mode: 'drafting' | 'intelligence' };
   events: EventRow[];
   stats: {
     events_today: number;
@@ -205,9 +206,16 @@ export default function Home() {
           <Link href="/triage" className="px-3 py-1.5 rounded bg-white text-black font-medium hover:bg-neutral-200">
             Triage{data && data.stats.events_unscored !== undefined ? ` · ${data.counts.all - data.counts.my_ratings}` : ''}
           </Link>
-          <Link href="/drafts" className="underline">Drafts</Link>
+          {data?.current_client?.mode === 'intelligence' && (
+            <Link href="/briefing" className="underline">Briefing</Link>
+          )}
+          {data?.current_client?.mode !== 'intelligence' && (
+            <Link href="/drafts" className="underline">Drafts</Link>
+          )}
           <Link href="/ratings" className="underline">Ratings</Link>
-          <Link href="/voice" className="underline">Voice</Link>
+          {data?.current_client?.mode !== 'intelligence' && (
+            <Link href="/voice" className="underline">Voice</Link>
+          )}
           <Link href="/watchlist" className="underline">Watchlist</Link>
           <Link href="/clients" className="underline">Clients</Link>
           <Link href="/run" className="underline opacity-60">debug</Link>
@@ -243,7 +251,12 @@ export default function Home() {
       </div>
 
       <div className="flex flex-wrap gap-2 mb-6">
-        {FILTERS.map(f => {
+        {FILTERS.filter(f => {
+          // Hide drafting-specific chips when client is intelligence-mode
+          if (data?.current_client?.mode === 'intelligence' &&
+              (f.id === 'drafted' || f.id === 'shipped')) return false;
+          return true;
+        }).map(f => {
           const count = data?.counts[f.id] ?? null;
           const active = filter === f.id;
           return (
@@ -277,7 +290,12 @@ export default function Home() {
 
       <div className="space-y-3">
         {data?.events.map(e => (
-          <EventCard key={e.id} event={e} onLocalRated={onLocalRated} />
+          <EventCard
+            key={e.id}
+            event={e}
+            onLocalRated={onLocalRated}
+            mode={data.current_client?.mode || 'drafting'}
+          />
         ))}
       </div>
     </main>
@@ -297,9 +315,11 @@ function Stat({ label, value, sub }: { label: string; value: number | string; su
 function EventCard({
   event: e,
   onLocalRated,
+  mode = 'drafting',
 }: {
   event: EventRow;
   onLocalRated: (id: number, next: Partial<EventRow>) => void;
+  mode?: 'drafting' | 'intelligence';
 }) {
   const [formOpen, setFormOpen] = useState<Rating>(null);
   const [reason, setReason] = useState<string>('');
@@ -438,12 +458,21 @@ function EventCard({
             Open on X
           </a>
         )}
-        <Link
-          href={`/event/${e.id}`}
-          className="text-xs px-3 py-1.5 rounded bg-white text-black font-medium hover:bg-neutral-200"
-        >
-          Draft posts
-        </Link>
+        {mode === 'drafting' ? (
+          <Link
+            href={`/event/${e.id}`}
+            className="text-xs px-3 py-1.5 rounded bg-white text-black font-medium hover:bg-neutral-200"
+          >
+            Draft posts
+          </Link>
+        ) : (
+          <Link
+            href={`/event/${e.id}`}
+            className="text-xs px-3 py-1.5 rounded border border-purple-500/40 bg-purple-500/10 text-purple-200"
+          >
+            Add to briefing
+          </Link>
+        )}
       </div>
 
       {e.feedback && !formOpen && (

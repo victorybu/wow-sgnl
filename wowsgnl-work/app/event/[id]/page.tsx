@@ -99,7 +99,7 @@ export default async function EventPage({
     SELECT e.id, e.author, e.content, e.url, e.posted_at, e.relevance_score,
            e.relevance_reason, e.status,
            e.feedback, e.feedback_at, e.feedback_reason, e.feedback_note,
-           c.name as client_name
+           c.name as client_name, c.mode as client_mode
     FROM events e JOIN clients c ON c.id = e.client_id
     WHERE e.id = ${eventId}
   `;
@@ -214,7 +214,17 @@ export default async function EventPage({
         </div>
       </article>
 
-      {drafts.length === 0 && (
+      {ev.client_mode === 'intelligence' && (
+        <div className="border border-purple-500/30 bg-purple-500/5 rounded-lg p-4 text-sm">
+          <p className="font-medium mb-1">{ev.client_name} is intelligence-mode.</p>
+          <p className="opacity-80 text-xs">
+            No drafting flow. Rate the event with 👍/👎 above to feed the briefing signal.
+            Visit <Link href="/briefing" className="underline">/briefing</Link> for the digest.
+          </p>
+        </div>
+      )}
+
+      {drafts.length === 0 && ev.client_mode !== 'intelligence' && (
         <div className="space-y-3">
           <form action={async () => { 'use server'; await genAngles(eventId); }}>
             <button
@@ -231,7 +241,7 @@ export default async function EventPage({
         </div>
       )}
 
-      {drafts.length > 0 && (
+      {drafts.length > 0 && ev.client_mode !== 'intelligence' && (
         <>
           <h2 className="text-sm font-bold uppercase opacity-60 mb-3">
             Angles ({drafts.length})

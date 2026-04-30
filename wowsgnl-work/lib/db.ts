@@ -17,6 +17,8 @@ export async function initSchema() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
   `;
+  await sql`ALTER TABLE clients ADD COLUMN IF NOT EXISTS mode TEXT DEFAULT 'drafting'`;
+  await sql`UPDATE clients SET mode = 'drafting' WHERE mode IS NULL`;
   await sql`
     CREATE TABLE IF NOT EXISTS watchlist (
       id SERIAL PRIMARY KEY,
