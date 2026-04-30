@@ -61,6 +61,7 @@ export async function GET() {
 
   const unscored = await sql`
     SELECT e.id, e.client_id, e.source, e.content, e.author,
+           e.posted_at, e.created_at,
            c.name as client_name, c.priority_topics
     FROM events e JOIN clients c ON c.id = e.client_id
     WHERE e.relevance_score IS NULL
@@ -71,11 +72,15 @@ export async function GET() {
 
   for (const e of unscored.rows) {
     try {
+      const refTs = e.posted_at ? Date.parse(e.posted_at) : Date.parse(e.created_at);
+      const hoursOld = Number.isFinite(refTs) ? (Date.now() - refTs) / 3_600_000 : null;
       const r = await scoreRelevance({
         content: e.content,
         source: e.source,
         clientName: e.client_name,
         priorityTopics: e.priority_topics || '',
+        author: e.author,
+        hoursOld,
       });
       await sql`UPDATE events SET relevance_score = ${r.score}, relevance_reason = ${r.reason} WHERE id = ${e.id}`;
       if (r.score < 5) await sql`UPDATE events SET status = 'ignored' WHERE id = ${e.id}`;
