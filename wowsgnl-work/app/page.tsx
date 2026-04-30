@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 
-type Filter = 'all' | 'unscored' | 'top' | 'drafted' | 'shipped' | 'my_ratings';
+type Filter = 'all' | 'unscored' | 'top' | 'drafted' | 'shipped' | 'my_ratings' | 'muted';
 type Rating = 'signal' | 'noise' | null;
 
 type EventRow = {
@@ -47,6 +47,7 @@ type Payload = {
     drafted: number;
     shipped: number;
     my_ratings: number;
+    muted: number;
   };
 };
 
@@ -96,6 +97,7 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: 'top', label: '7+ only' },
   { id: 'unscored', label: 'Unscored' },
   { id: 'my_ratings', label: 'My ratings' },
+  { id: 'muted', label: 'Muted' },
   { id: 'drafted', label: 'Drafted' },
   { id: 'shipped', label: 'Shipped' },
 ];
@@ -130,6 +132,7 @@ export default function Home() {
   }, [filter]);
 
   const onLocalRated = (eventId: number, next: Partial<EventRow>) => {
+    // Optimistic update: apply new feedback immediately to the card.
     setData(prev => {
       if (!prev) return prev;
       return {
@@ -137,6 +140,8 @@ export default function Home() {
         events: prev.events.map(e => (e.id === eventId ? { ...e, ...next } : e)),
       };
     });
+    // Then refetch so server-side filter (noise hidden, signal floats up) takes effect.
+    void load(filter);
   };
 
   const emptyMsg = (() => {
@@ -147,12 +152,17 @@ export default function Home() {
         : 'No events scored ≥7 yet.';
     }
     if (filter === 'my_ratings') return 'No ratings yet — click 👍 or 👎 on any card to start.';
+    if (filter === 'muted') return 'Nothing muted yet. Click 👎 on a tweet to hide it from the main feed.';
     if (filter === 'drafted') return 'No events drafted yet — click "Draft posts" on any card.';
     if (filter === 'shipped') return 'No drafts shipped yet.';
     if (filter === 'unscored') return 'All events scored! (Or no events yet.)';
-    return data.stats.events_total === 0
-      ? 'No events yet — first poll runs at the next top of hour.'
-      : null;
+    if (filter === 'all') {
+      if (data.stats.events_total === 0) return 'No events yet — first poll runs at the next top of hour.';
+      if (data.counts.muted > 0 && data.counts.all === 0)
+        return `All ${data.counts.muted} events have been muted. Switch to "Muted" to see them.`;
+      return null;
+    }
+    return null;
   })();
 
   return (
@@ -303,8 +313,14 @@ function EventCard({
 
   const reasonOpts = formOpen === 'signal' ? SIGNAL_REASONS : NOISE_REASONS;
 
+  const cardClass = (() => {
+    if (e.feedback === 'signal') return 'border-green-500/50 bg-green-500/5 hover:border-green-500/70';
+    if (e.feedback === 'noise') return 'border-red-500/30 bg-red-500/5 hover:border-red-500/50 opacity-60';
+    return 'border-neutral-800 hover:border-neutral-600';
+  })();
+
   return (
-    <article className="border border-neutral-800 rounded-lg p-4 hover:border-neutral-600 transition">
+    <article className={`border rounded-lg p-4 transition ${cardClass}`}>
       <header className="flex justify-between items-start gap-3 mb-2">
         <div className="flex items-center gap-2 flex-wrap">
           <span className={`text-xs font-bold px-2 py-0.5 rounded ${scoreClass(e.relevance_score)}`}>
