@@ -57,6 +57,7 @@ export async function initSchema() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
   `;
+  await sql`ALTER TABLE watchlist ADD COLUMN IF NOT EXISTS last_seen_source_id TEXT`;
   await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS feedback TEXT`;
   await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS feedback_at TIMESTAMPTZ`;
   await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS feedback_reason TEXT`;

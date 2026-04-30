@@ -27,15 +27,21 @@ export async function GET() {
         let inserted = 0;
         for (const w of watchlist.rows) {
           send('fetch_start', { value: w.value, kind: w.kind, client: w.client_name });
-          let tweets: any[] = [];
+          let fr: { tweets: any[]; newestSeenId: string | null };
           try {
-            if (w.kind === 'x_account') tweets = await fetchUserTweets(w.value);
-            else if (w.kind === 'x_keyword') tweets = await searchTweets(w.value);
+            if (w.kind === 'x_account') fr = await fetchUserTweets(w.value, { lastSeenId: w.last_seen_source_id, cap: 20 });
+            else if (w.kind === 'x_keyword') fr = await searchTweets(w.value, { lastSeenId: w.last_seen_source_id, cap: 20 });
+            else continue;
           } catch (e: any) {
             send('fetch_error', { value: w.value, error: e.message });
             continue;
           }
+          const tweets = fr.tweets;
           send('fetch_done', { value: w.value, count: tweets.length });
+
+          if (fr.newestSeenId && fr.newestSeenId !== w.last_seen_source_id) {
+            await sql`UPDATE watchlist SET last_seen_source_id = ${fr.newestSeenId} WHERE id = ${w.id}`;
+          }
 
           for (const t of tweets) {
             const url = `https://x.com/${t.author?.userName || ''}/status/${t.id}`;
