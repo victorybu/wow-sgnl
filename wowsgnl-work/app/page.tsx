@@ -290,11 +290,12 @@ function EventCard({
       });
       if (!res.ok) throw new Error(`${res.status}`);
       const j = await res.json();
+      const updated = j.row || j.event || {};
       onLocalRated(e.id, {
-        feedback: j.event.feedback,
-        feedback_at: j.event.feedback_at,
-        feedback_reason: j.event.feedback_reason,
-        feedback_note: j.event.feedback_note,
+        feedback: updated.feedback ?? null,
+        feedback_at: updated.feedback_at ?? null,
+        feedback_reason: updated.feedback_reason ?? null,
+        feedback_note: updated.feedback_note ?? null,
       });
       closeForm();
     } catch (err: any) {
