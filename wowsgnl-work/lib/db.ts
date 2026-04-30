@@ -61,6 +61,27 @@ export async function initSchema() {
   await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS feedback_at TIMESTAMPTZ`;
   await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS feedback_reason TEXT`;
   await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS feedback_note TEXT`;
+  await sql`ALTER TABLE drafts ADD COLUMN IF NOT EXISTS feedback TEXT`;
+  await sql`ALTER TABLE drafts ADD COLUMN IF NOT EXISTS feedback_at TIMESTAMPTZ`;
+  await sql`ALTER TABLE drafts ADD COLUMN IF NOT EXISTS feedback_reason TEXT`;
+  await sql`ALTER TABLE drafts ADD COLUMN IF NOT EXISTS feedback_note TEXT`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS posts (
+      id SERIAL PRIMARY KEY,
+      draft_id INTEGER REFERENCES drafts(id) ON DELETE CASCADE,
+      position INTEGER,
+      content TEXT NOT NULL,
+      platform TEXT,
+      shipped BOOLEAN DEFAULT FALSE,
+      shipped_at TIMESTAMPTZ,
+      feedback TEXT,
+      feedback_at TIMESTAMPTZ,
+      feedback_reason TEXT,
+      feedback_note TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS posts_draft_idx ON posts(draft_id);`;
   await sql`
     CREATE TABLE IF NOT EXISTS ratings_history (
       id SERIAL PRIMARY KEY,
@@ -71,6 +92,12 @@ export async function initSchema() {
       rated_at TIMESTAMPTZ DEFAULT NOW()
     );
   `;
+  await sql`ALTER TABLE ratings_history ADD COLUMN IF NOT EXISTS kind TEXT`;
+  await sql`ALTER TABLE ratings_history ADD COLUMN IF NOT EXISTS target_id INTEGER`;
+  await sql`ALTER TABLE ratings_history ALTER COLUMN kind SET DEFAULT 'event'`;
+  await sql`ALTER TABLE ratings_history ALTER COLUMN event_id DROP NOT NULL`;
+  await sql`UPDATE ratings_history SET kind='event', target_id=event_id WHERE kind IS NULL`;
   await sql`CREATE INDEX IF NOT EXISTS ratings_history_event_idx ON ratings_history(event_id);`;
+  await sql`CREATE INDEX IF NOT EXISTS ratings_history_target_idx ON ratings_history(kind, target_id);`;
   await sql`CREATE INDEX IF NOT EXISTS ratings_history_rated_at_idx ON ratings_history(rated_at DESC);`;
 }

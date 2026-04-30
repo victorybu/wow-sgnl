@@ -177,9 +177,10 @@ export default function Home() {
           )}
         </div>
         <div className="space-x-4 text-xs">
+          <Link href="/drafts" className="underline">Drafts</Link>
+          <Link href="/ratings" className="underline">Ratings</Link>
           <Link href="/watchlist" className="underline">Watchlist</Link>
           <Link href="/clients" className="underline">Clients</Link>
-          <Link href="/ratings" className="underline">Ratings</Link>
           <Link href="/run" className="underline opacity-60">debug</Link>
         </div>
       </div>
