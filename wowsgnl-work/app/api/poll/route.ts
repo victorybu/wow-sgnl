@@ -1,6 +1,7 @@
 import { sql } from '@/lib/db';
 import { fetchUserTweets, searchTweets } from '@/lib/twitterapi';
 import { scoreRelevance } from '@/lib/relevance';
+import { generateAngles } from '@/lib/drafts';
 import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
@@ -83,5 +84,38 @@ export async function GET() {
     }
   }
 
-  return NextResponse.json({ ok: true, inserted, scored, debug, errors });
+  // Top picks: pre-generate angles for up to 5 fresh score>=7 events
+  // that don't yet have any drafts, posted in the last 6 hours, not muted.
+  // Surfaces ready-to-pick angles on the homepage hero on next refresh.
+  const topPicks = await sql`
+    SELECT e.id, e.content, c.name AS client_name, c.voice_profile
+    FROM events e JOIN clients c ON c.id = e.client_id
+    WHERE e.relevance_score >= 7
+      AND (e.feedback IS DISTINCT FROM 'noise')
+      AND COALESCE(e.posted_at, e.created_at) >= NOW() - INTERVAL '6 hours'
+      AND NOT EXISTS (SELECT 1 FROM drafts d WHERE d.event_id = e.id)
+    ORDER BY e.relevance_score DESC, COALESCE(e.posted_at, e.created_at) DESC
+    LIMIT 5
+  `;
+  let auto_angled = 0;
+  for (const ev of topPicks.rows) {
+    try {
+      const angles = await generateAngles({
+        event: ev.content,
+        clientName: ev.client_name,
+        voiceProfile: ev.voice_profile || '',
+      });
+      for (const a of angles) {
+        await sql`INSERT INTO drafts (event_id, angle, platform) VALUES (${ev.id}, ${a}, 'x')`;
+      }
+      if (angles.length > 0) {
+        await sql`UPDATE events SET status = 'drafted' WHERE id = ${ev.id} AND status = 'new'`;
+        auto_angled++;
+      }
+    } catch (err: any) {
+      errors.push(`auto-angle event ${ev.id}: ${err.message}`);
+    }
+  }
+
+  return NextResponse.json({ ok: true, inserted, scored, auto_angled, debug, errors });
 }

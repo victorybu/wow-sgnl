@@ -155,11 +155,39 @@ export async function GET(req: Request) {
       (SELECT COUNT(*)::int FROM events WHERE feedback = 'noise') AS muted
   `;
 
+  // Top picks: score >= 7, not muted, posted in last 6 hours (≈ last 2 cron pulls
+  // at 3h cadence). Bring drafts inline.
+  const topPicks = await sql`
+    SELECT e.id, e.author, e.content, e.url, e.relevance_score, e.relevance_reason,
+           e.posted_at, e.created_at,
+           e.feedback, e.feedback_at, e.feedback_reason, e.feedback_note,
+           c.name AS client_name,
+           EXISTS(SELECT 1 FROM drafts d WHERE d.event_id = e.id AND d.shipped = TRUE) AS is_shipped,
+           COALESCE(
+             (SELECT json_agg(json_build_object(
+                'id', d.id, 'angle', d.angle,
+                'feedback', d.feedback, 'feedback_reason', d.feedback_reason,
+                'post_count', (SELECT COUNT(*)::int FROM posts p WHERE p.draft_id = d.id),
+                'shipped_count', (SELECT COUNT(*)::int FROM posts p WHERE p.draft_id = d.id AND p.shipped = TRUE)
+              ) ORDER BY d.id ASC)
+              FROM drafts d WHERE d.event_id = e.id),
+             '[]'::json
+           ) AS drafts
+    FROM events e
+    JOIN clients c ON c.id = e.client_id
+    WHERE e.relevance_score >= 7
+      AND (e.feedback IS DISTINCT FROM 'noise')
+      AND COALESCE(e.posted_at, e.created_at) >= NOW() - INTERVAL '6 hours'
+    ORDER BY e.relevance_score DESC, COALESCE(e.posted_at, e.created_at) DESC
+    LIMIT 5
+  `;
+
   return NextResponse.json({
     ts: new Date().toISOString(),
     filter,
     events,
     stats: stats.rows[0],
     counts: counts.rows[0],
+    top_picks: topPicks.rows,
   });
 }

@@ -25,6 +25,30 @@ type EventRow = {
   is_shipped: boolean;
 };
 
+type DraftSummary = {
+  id: number;
+  angle: string;
+  feedback: 'signal' | 'noise' | null;
+  feedback_reason: string | null;
+  post_count: number;
+  shipped_count: number;
+};
+
+type TopPick = {
+  id: number;
+  author: string | null;
+  content: string;
+  url: string | null;
+  relevance_score: number | null;
+  relevance_reason: string | null;
+  posted_at: string | null;
+  created_at: string;
+  feedback: 'signal' | 'noise' | null;
+  client_name: string;
+  is_shipped: boolean;
+  drafts: DraftSummary[];
+};
+
 type Payload = {
   ts: string;
   filter: Filter;
@@ -49,6 +73,7 @@ type Payload = {
     my_ratings: number;
     muted: number;
   };
+  top_picks: TopPick[];
 };
 
 const SIGNAL_REASONS = [
@@ -184,6 +209,22 @@ export default function Home() {
           <Link href="/run" className="underline opacity-60">debug</Link>
         </div>
       </div>
+
+      {data && data.top_picks && data.top_picks.length > 0 && (
+        <section className="mb-6">
+          <div className="flex items-baseline justify-between mb-2">
+            <h2 className="text-sm font-bold uppercase tracking-wide text-green-300">
+              Top picks · last 6h
+            </h2>
+            <span className="text-xs opacity-50">{data.top_picks.length} ready to draft</span>
+          </div>
+          <div className="space-y-3">
+            {data.top_picks.map(p => (
+              <TopPickCard key={p.id} pick={p} />
+            ))}
+          </div>
+        </section>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
         <Stat label="Events today" value={data?.stats.events_today ?? '—'} sub={data ? `${data.stats.events_total} total` : ''} />
@@ -454,6 +495,112 @@ function EventCard({
           {errorMsg && (
             <div className="text-xs text-red-300">save error: {errorMsg}</div>
           )}
+        </div>
+      )}
+    </article>
+  );
+}
+
+
+function TopPickCard({ pick: p }: { pick: TopPick }) {
+  const scoreCls =
+    p.relevance_score !== null && p.relevance_score >= 7
+      ? "bg-green-500/20 text-green-300 border border-green-500/40"
+      : "bg-yellow-500/15 text-yellow-300 border border-yellow-500/40";
+  return (
+    <article className="border border-green-500/30 bg-green-500/5 rounded-lg p-4">
+      <header className="flex items-center gap-2 flex-wrap mb-2">
+        <span className={`text-sm font-bold px-2 py-0.5 rounded ${scoreCls}`}>
+          {p.relevance_score ?? "?"}/10
+        </span>
+        {p.author && (
+          <a
+            href={`https://x.com/${p.author}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm hover:underline"
+          >
+            @{p.author}
+          </a>
+        )}
+        <span className="text-xs opacity-40">·</span>
+        <span className="text-xs opacity-50">{timeAgo(p.posted_at || p.created_at)}</span>
+        {p.is_shipped && (
+          <span className="text-xs px-1.5 py-0.5 rounded bg-green-500/20 text-green-300 border border-green-500/40">
+            shipped
+          </span>
+        )}
+      </header>
+      <p className="text-sm whitespace-pre-wrap mb-2 leading-relaxed">{p.content}</p>
+      {p.relevance_reason && (
+        <p className="text-xs opacity-60 italic mb-3">{p.relevance_reason}</p>
+      )}
+
+      {p.drafts.length === 0 ? (
+        <div className="border-t border-green-500/20 pt-3 flex items-center gap-2 flex-wrap">
+          <span className="text-xs opacity-60">No angles yet —</span>
+          <Link
+            href={`/event/${p.id}`}
+            className="text-xs px-3 py-1.5 rounded bg-white text-black font-medium hover:bg-neutral-200"
+          >
+            Generate angles
+          </Link>
+          {p.url && (
+            <a
+              href={p.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs px-3 py-1.5 rounded border border-neutral-700 hover:border-neutral-500"
+            >
+              Open on X ↗
+            </a>
+          )}
+        </div>
+      ) : (
+        <div className="border-t border-green-500/20 pt-3">
+          <div className="text-xs uppercase opacity-50 mb-2">
+            {p.drafts.length} angle{p.drafts.length === 1 ? "" : "s"} ready
+          </div>
+          <ol className="space-y-2 mb-3">
+            {p.drafts.map((d, i) => (
+              <li key={d.id} className="flex items-start gap-2 text-sm">
+                <span className="opacity-50 shrink-0 font-mono">{i + 1}.</span>
+                <span className="flex-1">
+                  {d.angle}
+                  {d.feedback === "signal" && (
+                    <span className="ml-2 text-xs text-green-300">👍</span>
+                  )}
+                  {d.feedback === "noise" && (
+                    <span className="ml-2 text-xs text-red-300">👎</span>
+                  )}
+                  {d.post_count > 0 && (
+                    <span className="ml-2 text-xs opacity-50">
+                      · {d.post_count} variant{d.post_count === 1 ? "" : "s"}
+                      {d.shipped_count > 0 && ` · ${d.shipped_count} shipped`}
+                    </span>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ol>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Link
+              href={`/event/${p.id}`}
+              className="text-xs px-3 py-1.5 rounded bg-white text-black font-medium hover:bg-neutral-200"
+            >
+              Open & draft posts →
+            </Link>
+            {p.url && (
+              <a
+                href={p.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs px-3 py-1.5 rounded border border-neutral-700 hover:border-neutral-500"
+              >
+                Open on X ↗
+              </a>
+            )}
+          </div>
         </div>
       )}
     </article>
