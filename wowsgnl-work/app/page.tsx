@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 
-type Filter = 'all_scored' | 'top' | 'drafted' | 'shipped';
+type Filter = 'all' | 'unscored' | 'top' | 'drafted' | 'shipped';
 
 type EventRow = {
   id: number;
@@ -33,7 +33,8 @@ type Payload = {
     events_unscored: number;
   };
   counts: {
-    all_scored: number;
+    all: number;
+    unscored: number;
     top: number;
     drafted: number;
     shipped: number;
@@ -55,21 +56,22 @@ function timeAgo(iso: string | null): string {
 }
 
 function scoreClass(score: number | null): string {
-  if (score === null) return 'bg-neutral-800 text-neutral-400';
+  if (score === null) return 'bg-neutral-800/60 text-neutral-400 border border-neutral-700';
   if (score >= 7) return 'bg-green-500/20 text-green-300 border border-green-500/40';
   if (score >= 5) return 'bg-yellow-500/15 text-yellow-300 border border-yellow-500/40';
   return 'bg-neutral-800 text-neutral-500 border border-neutral-700';
 }
 
 const FILTERS: { id: Filter; label: string }[] = [
-  { id: 'all_scored', label: 'All scored (5+)' },
+  { id: 'all', label: 'All events' },
   { id: 'top', label: '7+ only' },
+  { id: 'unscored', label: 'Unscored' },
   { id: 'drafted', label: 'Drafted' },
   { id: 'shipped', label: 'Shipped' },
 ];
 
 export default function Home() {
-  const [filter, setFilter] = useState<Filter>('all_scored');
+  const [filter, setFilter] = useState<Filter>('all');
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -166,7 +168,7 @@ export default function Home() {
             <header className="flex justify-between items-start gap-3 mb-2">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className={`text-xs font-bold px-2 py-0.5 rounded ${scoreClass(e.relevance_score)}`}>
-                  {e.relevance_score ?? '—'}/10
+                  {e.relevance_score === null ? 'pending' : `${e.relevance_score}/10`}
                 </span>
                 {e.author && (
                   <a

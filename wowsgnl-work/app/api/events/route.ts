@@ -5,11 +5,11 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const fetchCache = 'force-no-store';
 
-type Filter = 'all_scored' | 'top' | 'drafted' | 'shipped';
+type Filter = 'all' | 'unscored' | 'top' | 'drafted' | 'shipped';
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const filter = (searchParams.get('filter') || 'all_scored') as Filter;
+  const filter = (searchParams.get('filter') || 'all') as Filter;
 
   let events: any[] = [];
 
@@ -23,7 +23,7 @@ export async function GET(req: Request) {
       FROM events e
       JOIN clients c ON c.id = e.client_id
       WHERE EXISTS(SELECT 1 FROM drafts d WHERE d.event_id = e.id AND d.shipped = TRUE)
-      ORDER BY e.relevance_score DESC NULLS LAST, e.created_at DESC
+      ORDER BY e.relevance_score DESC NULLS LAST, e.posted_at DESC NULLS LAST, e.created_at DESC
       LIMIT 200
     `;
     events = r.rows;
@@ -37,7 +37,7 @@ export async function GET(req: Request) {
       FROM events e
       JOIN clients c ON c.id = e.client_id
       WHERE e.status = 'drafted'
-      ORDER BY e.relevance_score DESC NULLS LAST, e.created_at DESC
+      ORDER BY e.relevance_score DESC NULLS LAST, e.posted_at DESC NULLS LAST, e.created_at DESC
       LIMIT 200
     `;
     events = r.rows;
@@ -51,7 +51,21 @@ export async function GET(req: Request) {
       FROM events e
       JOIN clients c ON c.id = e.client_id
       WHERE e.relevance_score >= 7
-      ORDER BY e.relevance_score DESC, e.created_at DESC
+      ORDER BY e.relevance_score DESC, e.posted_at DESC NULLS LAST, e.created_at DESC
+      LIMIT 200
+    `;
+    events = r.rows;
+  } else if (filter === 'unscored') {
+    const r = await sql`
+      SELECT e.id, e.author, e.content, e.url, e.relevance_score, e.relevance_reason,
+             e.status, e.posted_at, e.created_at,
+             c.name AS client_name,
+             EXISTS(SELECT 1 FROM drafts d WHERE d.event_id = e.id) AS has_drafts,
+             EXISTS(SELECT 1 FROM drafts d WHERE d.event_id = e.id AND d.shipped = TRUE) AS is_shipped
+      FROM events e
+      JOIN clients c ON c.id = e.client_id
+      WHERE e.relevance_score IS NULL
+      ORDER BY e.posted_at DESC NULLS LAST, e.created_at DESC
       LIMIT 200
     `;
     events = r.rows;
@@ -64,8 +78,7 @@ export async function GET(req: Request) {
              EXISTS(SELECT 1 FROM drafts d WHERE d.event_id = e.id AND d.shipped = TRUE) AS is_shipped
       FROM events e
       JOIN clients c ON c.id = e.client_id
-      WHERE e.relevance_score >= 5
-      ORDER BY e.relevance_score DESC, e.created_at DESC
+      ORDER BY e.relevance_score DESC NULLS LAST, e.posted_at DESC NULLS LAST, e.created_at DESC
       LIMIT 200
     `;
     events = r.rows;
@@ -86,7 +99,8 @@ export async function GET(req: Request) {
 
   const counts = await sql`
     SELECT
-      (SELECT COUNT(*)::int FROM events WHERE relevance_score >= 5) AS all_scored,
+      (SELECT COUNT(*)::int FROM events) AS all,
+      (SELECT COUNT(*)::int FROM events WHERE relevance_score IS NULL) AS unscored,
       (SELECT COUNT(*)::int FROM events WHERE relevance_score >= 7) AS top,
       (SELECT COUNT(*)::int FROM events WHERE status = 'drafted') AS drafted,
       (SELECT COUNT(*)::int FROM events e WHERE EXISTS(SELECT 1 FROM drafts d WHERE d.event_id = e.id AND d.shipped = TRUE)) AS shipped
