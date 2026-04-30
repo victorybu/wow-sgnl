@@ -54,7 +54,7 @@ export async function GET() {
     FROM events e JOIN clients c ON c.id = e.client_id
     WHERE e.relevance_score IS NULL
     ORDER BY e.created_at DESC, e.id DESC
-    LIMIT 30
+    LIMIT 100
   `;
   debug.unscored_count = unscored.rows.length;
 
