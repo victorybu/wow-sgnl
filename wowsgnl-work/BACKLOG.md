@@ -43,7 +43,7 @@ I add items via the GitHub mobile editor or laptop anytime — Claude picks them
 - [x] **Item 4 — Automated engagement capture post-ship** — `shipped` 2026-05-01 (commit f9046e9; daily cron at 14:00 UTC)
 - [x] **Item 5 — Mobile PWA** — `shipped` 2026-05-01 (commit 73a6666)
 - [x] **Item 6 — Topic clustering on Top Picks** — `shipped` 2026-05-01 (commit eb20a1c)
-- [ ] Item 7 — Anti-voice examples — `queued`
+- [x] **Item 7 — Anti-voice examples** — `shipped` 2026-05-01 (commits ddb2b72, 239765e)
 - [ ] Item 8 — Intelligence-mode briefing page — `queued`
 - [ ] Item 9 — Standing Brief on homepage — `queued`
 
