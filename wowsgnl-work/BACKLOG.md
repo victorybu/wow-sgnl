@@ -45,7 +45,7 @@ I add items via the GitHub mobile editor or laptop anytime — Claude picks them
 - [x] **Item 6 — Topic clustering on Top Picks** — `shipped` 2026-05-01 (commit eb20a1c)
 - [x] **Item 7 — Anti-voice examples** — `shipped` 2026-05-01 (commits ddb2b72, 239765e)
 - [x] **Item 8 — Intelligence-mode briefing page** — `shipped` 2026-05-01 (commit b11c06d; bundled bulk-add watchlist)
-- [ ] Item 9 — Standing Brief on homepage — `queued`
+- [x] **Item 9 — Standing Brief on homepage** — `shipped` 2026-05-01 (commit f14cecc)
 
 ---
 
