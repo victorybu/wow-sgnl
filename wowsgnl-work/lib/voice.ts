@@ -135,7 +135,7 @@ export async function addRejectedDraftExample(opts: {
     VALUES
       (${opts.clientId}, 'rejected_angle', ${opts.draftId}, ${opts.eventId},
        ${opts.angle}, ${opts.eventContent}, ${opts.angle}, -1, ${packedNotes})
-    ON CONFLICT (source_draft_id) DO UPDATE SET
+    ON CONFLICT (source_draft_id) WHERE source_draft_id IS NOT NULL DO UPDATE SET
        source = EXCLUDED.source,
        content = EXCLUDED.content,
        context = EXCLUDED.context,
@@ -171,7 +171,7 @@ export async function addRejectedPostExample(opts: {
     VALUES
       (${opts.clientId}, 'rejected_post', ${opts.postId}, ${opts.eventId},
        ${opts.content}, ${opts.eventContent}, ${opts.angle}, -1, ${packedNotes})
-    ON CONFLICT (source_post_id) DO UPDATE SET
+    ON CONFLICT (source_post_id) WHERE source_post_id IS NOT NULL DO UPDATE SET
        source = EXCLUDED.source,
        content = EXCLUDED.content,
        context = EXCLUDED.context,
