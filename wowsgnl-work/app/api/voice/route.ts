@@ -31,7 +31,9 @@ export async function GET(req: Request) {
   const examplesRes = await sql`
     SELECT id, source, source_post_id, source_event_id,
            content, context, angle, original_draft, was_edited,
-           weight, notes, added_at
+           weight, notes, added_at,
+           shipped_tweet_id, engagement_24h, engagement_7d,
+           engagement_velocity, engagement_fetched_at, auto_weight_reason
     FROM voice_examples
     WHERE client_id = ${clientId}
     ORDER BY weight DESC, added_at DESC

@@ -1,6 +1,7 @@
 import { sql } from '@/lib/db';
 import { NextResponse } from 'next/server';
 import { addShippedPostExample, unshipPostExample } from '@/lib/voice';
+import { parseTweetId, fetchTweetEngagement, clientMedianVelocity, autoWeightFromVelocity } from '@/lib/engagement';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -11,7 +12,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   if (!Number.isInteger(id) || id <= 0) {
     return NextResponse.json({ ok: false, error: 'invalid_id' }, { status: 400 });
   }
-  let body: { content?: string; shipped?: boolean };
+  let body: { content?: string; shipped?: boolean; shipped_tweet_url?: string; shipped_tweet_id?: string };
   try {
     body = await req.json();
   } catch {
@@ -50,6 +51,17 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
           context: meta.event_content,
           angle: meta.angle,
         });
+        // Item 4: capture shipped_tweet_id for engagement tracking. Accept
+        // either a full URL or a bare numeric id from the client. Ignore
+        // silently if neither is provided — user can edit later via /voice.
+        const tid = parseTweetId(body.shipped_tweet_url || body.shipped_tweet_id || '');
+        if (tid) {
+          await sql`
+            UPDATE voice_examples
+            SET shipped_tweet_id = ${tid}
+            WHERE source_post_id = ${meta.post_id}
+          `;
+        }
       }
     } else {
       await sql`UPDATE posts SET shipped = FALSE, shipped_at = NULL WHERE id = ${id}`;

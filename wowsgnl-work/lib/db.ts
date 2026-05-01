@@ -126,4 +126,9 @@ export async function initSchema() {
   await sql`ALTER TABLE voice_examples ADD COLUMN IF NOT EXISTS engagement_24h JSONB`;
   await sql`ALTER TABLE voice_examples ADD COLUMN IF NOT EXISTS engagement_velocity NUMERIC`;
   await sql`CREATE INDEX IF NOT EXISTS voice_examples_velocity_idx ON voice_examples(client_id, engagement_velocity DESC NULLS LAST);`;
+  await sql`ALTER TABLE voice_examples ADD COLUMN IF NOT EXISTS shipped_tweet_id TEXT`;
+  await sql`ALTER TABLE voice_examples ADD COLUMN IF NOT EXISTS engagement_7d JSONB`;
+  await sql`ALTER TABLE voice_examples ADD COLUMN IF NOT EXISTS engagement_fetched_at TIMESTAMPTZ`;
+  await sql`ALTER TABLE voice_examples ADD COLUMN IF NOT EXISTS auto_weight_reason TEXT`;
+  await sql`CREATE INDEX IF NOT EXISTS voice_examples_shipped_tweet_idx ON voice_examples(shipped_tweet_id) WHERE shipped_tweet_id IS NOT NULL;`;
 }

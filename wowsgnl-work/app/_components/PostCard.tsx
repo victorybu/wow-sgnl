@@ -21,6 +21,8 @@ export default function PostCard({ post }: { post: Post }) {
   const [draft, setDraft] = useState(post.content);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [shippingOpen, setShippingOpen] = useState(false);
+  const [tweetUrl, setTweetUrl] = useState('');
 
   const saveEdit = async () => {
     setSaving(true);
@@ -41,14 +43,34 @@ export default function PostCard({ post }: { post: Post }) {
     }
   };
 
-  const toggleShip = async () => {
+  const confirmShip = async () => {
     setSaving(true);
     setError(null);
     try {
       const res = await fetch(`/api/posts/${post.id}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ shipped: !post.shipped }),
+        body: JSON.stringify({ shipped: true, shipped_tweet_url: tweetUrl.trim() || undefined }),
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      setShippingOpen(false);
+      setTweetUrl('');
+      router.refresh();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const unship = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/posts/${post.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ shipped: false }),
       });
       if (!res.ok) throw new Error(`${res.status}`);
       router.refresh();
@@ -126,7 +148,7 @@ export default function PostCard({ post }: { post: Post }) {
           </button>
         )}
         <button
-          onClick={toggleShip}
+          onClick={() => post.shipped ? unship() : setShippingOpen(true)}
           disabled={saving}
           className={`text-xs px-2 py-1 rounded border ${
             post.shipped
@@ -143,6 +165,41 @@ export default function PostCard({ post }: { post: Post }) {
           Copy
         </button>
       </div>
+
+      {shippingOpen && !post.shipped && (
+        <div className="border border-green-500/40 bg-green-500/5 rounded p-3 space-y-2 text-xs">
+          <div className="font-medium">Mark this variant as shipped</div>
+          <div className="opacity-70">
+            Paste the URL of the tweet you actually posted (or leave blank to skip).
+            With the URL, engagement (likes, RTs, replies) auto-imports at +24h and
+            +7d so the voice loop knows what landed.
+          </div>
+          <input
+            value={tweetUrl}
+            onChange={e => setTweetUrl(e.target.value)}
+            placeholder="https://x.com/RepRoKhanna/status/12345…"
+            disabled={saving}
+            autoFocus
+            className="w-full bg-neutral-900 border border-neutral-700 rounded px-3 py-2 font-mono"
+          />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={confirmShip}
+              disabled={saving}
+              className="px-3 py-1.5 rounded bg-green-500/20 border border-green-500/60 text-green-100 font-medium disabled:opacity-50"
+            >
+              {saving ? 'Saving…' : 'Confirm shipped'}
+            </button>
+            <button
+              onClick={() => { setShippingOpen(false); setTweetUrl(''); }}
+              disabled={saving}
+              className="px-3 py-1.5 rounded border border-neutral-700 hover:border-neutral-500"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       <RatingForm
         kind="post"

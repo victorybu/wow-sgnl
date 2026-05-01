@@ -5,7 +5,7 @@ import Link from 'next/link';
 
 type Example = {
   id: number;
-  source: 'shipped_post' | 'manual';
+  source: 'shipped_post' | 'manual' | 'auto_canon' | string;
   source_post_id: number | null;
   source_event_id: number | null;
   content: string;
@@ -16,6 +16,12 @@ type Example = {
   weight: number;
   notes: string | null;
   added_at: string;
+  shipped_tweet_id?: string | null;
+  engagement_24h?: { likes: number; retweets: number; replies: number; quotes: number; views?: number | null } | null;
+  engagement_7d?: { likes: number; retweets: number; replies: number; quotes: number; views?: number | null } | null;
+  engagement_velocity?: number | string | null;
+  engagement_fetched_at?: string | null;
+  auto_weight_reason?: string | null;
 };
 
 type Payload = {
@@ -299,10 +305,17 @@ function ExampleRow({
         <span className={`px-1.5 py-0.5 rounded border ${
           ex.source === 'shipped_post'
             ? 'bg-green-500/15 text-green-300 border-green-500/40'
-            : 'bg-blue-500/15 text-blue-300 border-blue-500/40'
+            : ex.source === 'auto_canon'
+              ? 'bg-purple-500/15 text-purple-300 border-purple-500/40'
+              : 'bg-blue-500/15 text-blue-300 border-blue-500/40'
         }`}>
-          {ex.source === 'shipped_post' ? 'shipped' : 'manual'}
+          {ex.source === 'shipped_post' ? 'shipped' : ex.source === 'auto_canon' ? 'auto-canon' : 'manual'}
         </span>
+        {ex.weight === 3 && (
+          <span className="px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-200 border border-yellow-500/40">
+            🥇 gold
+          </span>
+        )}
         {ex.was_edited && diff && (
           <span className="px-1.5 py-0.5 rounded bg-yellow-500/15 text-yellow-300 border border-yellow-500/40">
             edited · {Math.round(diff.ratio * 100)}% changed
@@ -314,7 +327,42 @@ function ExampleRow({
             see source →
           </Link>
         )}
+        {ex.shipped_tweet_id && (
+          <a
+            href={`https://x.com/i/status/${ex.shipped_tweet_id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="opacity-50 hover:underline"
+          >
+            view on X ↗
+          </a>
+        )}
       </header>
+
+      {(ex.engagement_24h || ex.engagement_7d) && (
+        <div className="text-xs opacity-70 mb-2 flex items-center gap-3 flex-wrap">
+          {ex.engagement_24h && (
+            <span>
+              24h: ❤️ {ex.engagement_24h.likes} · 🔁 {ex.engagement_24h.retweets} · 💬 {ex.engagement_24h.replies}
+              {ex.engagement_24h.quotes ? ` · 📋 ${ex.engagement_24h.quotes}` : ''}
+            </span>
+          )}
+          {ex.engagement_7d && (
+            <span className="opacity-80">
+              7d: ❤️ {ex.engagement_7d.likes} · 🔁 {ex.engagement_7d.retweets} · 💬 {ex.engagement_7d.replies}
+            </span>
+          )}
+          {typeof ex.engagement_velocity !== 'undefined' && ex.engagement_velocity !== null && (
+            <span className="opacity-50">velocity {Number(ex.engagement_velocity).toFixed(2)}/h</span>
+          )}
+        </div>
+      )}
+
+      {ex.auto_weight_reason && (
+        <div className="text-xs opacity-70 mb-2 italic text-yellow-300">
+          ⚙️ {ex.auto_weight_reason}
+        </div>
+      )}
 
       {ex.context && (
         <div className="text-xs opacity-50 italic mb-2">in response to: "{ex.context.slice(0, 160)}{ex.context.length > 160 ? '…' : ''}"</div>
