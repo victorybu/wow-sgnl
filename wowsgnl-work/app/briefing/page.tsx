@@ -151,6 +151,25 @@ export default async function BriefingPage() {
   }
   const topicAggs = Array.from(topicMap.values()).sort((a, b) => b.total - a.total);
 
+  // 7-day tagged-event timeline (newest day on the right). Each bucket
+  // is a calendar day in UTC; we render an ASCII sparkline so the
+  // operator can see at a glance whether activity is rising / falling
+  // / spiked yesterday. Bucket count is small (7) so we precompute
+  // here and let the component just render the strings.
+  const dayBuckets: { label: string; count: number }[] = [];
+  for (let i = 6; i >= 0; i--) {
+    const day = new Date(Date.now() - i * 86_400_000);
+    const dayStart = new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate()));
+    const dayEnd = new Date(dayStart.getTime() + 86_400_000);
+    const count = allEvents.filter(e => {
+      if (!e.topic_tags || e.topic_tags.length === 0) return false;
+      const ts = Date.parse(e.posted_at || e.created_at);
+      return Number.isFinite(ts) && ts >= dayStart.getTime() && ts < dayEnd.getTime();
+    }).length;
+    const label = day.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
+    dayBuckets.push({ label, count });
+  }
+
   const totals = {
     last24h: last24h.length,
     last7d: allEvents.length,
@@ -185,6 +204,12 @@ export default async function BriefingPage() {
         <Stat label="Tagged 7d" value={totals.tagged} />
       </div>
 
+      {totals.tagged > 0 && (
+        <div className="mb-6 border border-purple-500/20 bg-purple-500/5 rounded-lg p-4">
+          <ActivityTimeline buckets={dayBuckets} />
+        </div>
+      )}
+
       <Section title="Topic mentions" sub="last 7 days · grouped by tag">
         {topicAggs.length === 0 ? (
           <Empty msg="No tagged mentions yet. Sentiment + topic_tags are written when polling scores intelligence-mode events; once tweets land in the next cron cycles, this section populates." />
@@ -199,22 +224,9 @@ export default async function BriefingPage() {
                   <span className="text-xs opacity-50">{agg.total} mention{agg.total === 1 ? '' : 's'}</span>
                 </div>
 
-                <div className="flex flex-wrap gap-1.5 mb-3 text-xs">
-                  <SentimentPill kind="positive" n={agg.by_sentiment.positive || 0} />
-                  <SentimentPill kind="negative" n={agg.by_sentiment.negative || 0} />
-                  <SentimentPill kind="neutral" n={agg.by_sentiment.neutral || 0} />
-                  <SentimentPill kind="mixed" n={agg.by_sentiment.mixed || 0} />
-                  <span className="opacity-30 mx-1">·</span>
-                  {Object.entries(agg.by_party).filter(([p]) => p !== 'unsided').map(([p, n]) => (
-                    <span key={p} className={`px-2 py-0.5 rounded border ${partyClass(p)}`}>
-                      {p}: {n}
-                    </span>
-                  ))}
-                  {agg.by_party.unsided > 0 && (
-                    <span className="px-2 py-0.5 rounded border border-neutral-700 bg-neutral-900 text-neutral-400">
-                      unsided: {agg.by_party.unsided}
-                    </span>
-                  )}
+                <div className="grid md:grid-cols-2 gap-4 mb-3">
+                  <SentimentBars counts={agg.by_sentiment} />
+                  <PartyBars counts={agg.by_party} />
                 </div>
 
                 <ul className="space-y-2">
@@ -364,6 +376,95 @@ function Section({ title, sub, children }: { title: string; sub: string; childre
 
 function Empty({ msg }: { msg: string }) {
   return <p className="text-sm opacity-50 italic">{msg}</p>;
+}
+
+// ASCII bar generator. Returns "█████░░░░░" sized to `width` chars,
+// proportional to `value/max`. Used for sentiment/party split bars
+// and the 7-day timeline. Using monospace + block chars so the bars
+// align cleanly across rows without any chart library.
+function asciiBar(value: number, max: number, width = 12): string {
+  if (max <= 0 || value <= 0) return '░'.repeat(width);
+  const filled = Math.round((value / max) * width);
+  return '█'.repeat(Math.max(0, filled)) + '░'.repeat(Math.max(0, width - filled));
+}
+
+// Sparkline character for a single height. 0..max maps to ▁▂▃▄▅▆▇█.
+const SPARK_CHARS = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+function sparkChar(value: number, max: number): string {
+  if (max <= 0 || value <= 0) return SPARK_CHARS[0];
+  const idx = Math.min(8, Math.max(1, Math.round((value / max) * 8)));
+  return SPARK_CHARS[idx];
+}
+
+function SentimentBars({ counts }: { counts: Record<string, number> }) {
+  const rows: { label: string; key: string; color: string }[] = [
+    { label: '+ positive', key: 'positive', color: 'text-green-300' },
+    { label: '− negative', key: 'negative', color: 'text-red-300' },
+    { label: '· neutral ', key: 'neutral',  color: 'text-neutral-400' },
+    { label: '± mixed   ', key: 'mixed',    color: 'text-yellow-300' },
+  ];
+  const max = Math.max(1, ...rows.map(r => counts[r.key] || 0));
+  return (
+    <div className="font-mono text-xs leading-relaxed">
+      {rows.map(r => {
+        const n = counts[r.key] || 0;
+        return (
+          <div key={r.key} className={`flex gap-2 ${n === 0 ? 'opacity-30' : r.color}`}>
+            <span className="w-20 shrink-0">{r.label}</span>
+            <span className="select-none">{asciiBar(n, max, 14)}</span>
+            <span className="w-8 text-right tabular-nums">{n}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function PartyBars({ counts }: { counts: Record<string, number> }) {
+  const rows: { label: string; key: string; cls: string }[] = [
+    { label: 'D-side  ', key: 'D',       cls: 'text-blue-300' },
+    { label: 'R-side  ', key: 'R',       cls: 'text-red-300' },
+    { label: 'I-side  ', key: 'I',       cls: 'text-yellow-300' },
+    { label: 'unsided ', key: 'unsided', cls: 'text-neutral-400' },
+  ];
+  const max = Math.max(1, ...rows.map(r => counts[r.key] || 0));
+  const visible = rows.filter(r => (counts[r.key] || 0) > 0);
+  if (visible.length === 0) return null;
+  return (
+    <div className="font-mono text-xs leading-relaxed">
+      {visible.map(r => {
+        const n = counts[r.key] || 0;
+        return (
+          <div key={r.key} className={`flex gap-2 ${r.cls}`}>
+            <span className="w-20 shrink-0">{r.label}</span>
+            <span className="select-none">{asciiBar(n, max, 14)}</span>
+            <span className="w-8 text-right tabular-nums">{n}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ActivityTimeline({ buckets }: { buckets: { label: string; count: number }[] }) {
+  const max = Math.max(1, ...buckets.map(b => b.count));
+  const total = buckets.reduce((s, b) => s + b.count, 0);
+  return (
+    <div className="font-mono text-xs">
+      <div className="opacity-50 mb-1">tagged events · last 7 days · total {total}</div>
+      <div className="flex gap-1.5 items-end leading-none">
+        {buckets.map((b, i) => (
+          <div key={i} className="flex flex-col items-center w-7">
+            <span className="text-purple-300 text-lg leading-none" title={`${b.count} on ${b.label}`}>
+              {sparkChar(b.count, max)}
+            </span>
+            <span className="text-[10px] opacity-50 mt-0.5">{b.label.slice(0, 3)}</span>
+            <span className="text-[10px] opacity-70 tabular-nums">{b.count}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function SentimentPill({ kind, n }: { kind: 'positive' | 'negative' | 'neutral' | 'mixed'; n: number }) {

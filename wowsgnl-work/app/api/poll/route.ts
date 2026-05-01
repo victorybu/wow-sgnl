@@ -26,24 +26,46 @@ export async function GET() {
   let inserted = 0;
   let scored = 0;
 
-  for (const w of watchlist.rows) {
-    try {
+  // Parallelize watcher fetches in chunks. With 100+ active watchers,
+  // a serial loop blows past the 300s lambda before scoring even
+  // starts. Chunk size 8 is the sweet spot — twitterapi.io is
+  // happy with bursts that small, and the math works out: 100
+  // watchers / 8 in-flight × ~2s/call = ~25s for ingestion vs 200s+
+  // serial. Per-chunk Promise.allSettled keeps one bad watcher from
+  // poisoning the whole chunk.
+  const CHUNK_SIZE = 8;
+  for (let i = 0; i < watchlist.rows.length; i += CHUNK_SIZE) {
+    const chunk = watchlist.rows.slice(i, i + CHUNK_SIZE);
+    const results = await Promise.allSettled(chunk.map(async (w: any) => {
       let result: { tweets: any[]; newestSeenId: string | null };
       if (w.kind === 'x_account') {
         result = await fetchUserTweets(w.value, { lastSeenId: w.last_seen_source_id, cap: 20 });
       } else if (w.kind === 'x_keyword') {
         result = await searchTweets(w.value, { lastSeenId: w.last_seen_source_id, cap: 20 });
-      } else continue;
-
-      const tweets = result.tweets;
-      debug.fetched_per_watcher.push({ value: w.value, kind: w.kind, count: tweets.length });
-
-      // Persist newest source_id we saw (regardless of filter outcome) so
-      // future polls can skip ground we've already covered.
-      if (result.newestSeenId && result.newestSeenId !== w.last_seen_source_id) {
-        await sql`UPDATE watchlist SET last_seen_source_id = ${result.newestSeenId} WHERE id = ${w.id}`;
+      } else {
+        return { skipped: true } as any;
       }
+      return { w, result };
+    }));
 
+    // Sequentially handle DB writes — Neon's HTTP driver works best
+    // with one query at a time, and the writes are fast (small rows,
+    // ON CONFLICT DO NOTHING). Parallelizing fetches but serializing
+    // writes is the right shape for this workload.
+    for (let j = 0; j < results.length; j++) {
+      const w = chunk[j];
+      const r = results[j];
+      if (r.status === 'rejected') {
+        errors.push(`${w.value} (${w.kind}): ${(r.reason as any)?.message || 'unknown error'}`);
+        continue;
+      }
+      const v = r.value as any;
+      if (v.skipped) continue;
+      const tweets = v.result.tweets as any[];
+      debug.fetched_per_watcher.push({ value: w.value, kind: w.kind, count: tweets.length });
+      if (v.result.newestSeenId && v.result.newestSeenId !== w.last_seen_source_id) {
+        await sql`UPDATE watchlist SET last_seen_source_id = ${v.result.newestSeenId} WHERE id = ${w.id}`;
+      }
       for (const t of tweets) {
         const url = `https://x.com/${t.author?.userName || ''}/status/${t.id}`;
         const ins = await sql`
@@ -54,8 +76,6 @@ export async function GET() {
         `;
         if (ins.rows.length > 0) inserted++;
       }
-    } catch (e: any) {
-      errors.push(`${w.value} (${w.kind}): ${e.message}`);
     }
   }
 
@@ -66,7 +86,7 @@ export async function GET() {
     FROM events e JOIN clients c ON c.id = e.client_id
     WHERE e.relevance_score IS NULL
     ORDER BY e.created_at DESC, e.id DESC
-    LIMIT 100
+    LIMIT 40
   `;
   debug.unscored_count = unscored.rows.length;
 
