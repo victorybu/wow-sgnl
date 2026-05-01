@@ -62,16 +62,17 @@ Score the FINAL number after applying penalties and rewards. Cap at 0–10. Be h
 REASON FIELD: One sentence, under 25 words, naming the SPECIFIC priority-topic match (or lack thereof) and the time-sensitivity. Do not be generic.${isIntel ? `
 
 SENTIMENT FIELD (intelligence mode):
-- "positive" — author endorses, defends, or speaks favorably about a priority topic
-- "negative" — author attacks, criticizes, or speaks unfavorably about a priority topic
-- "neutral" — descriptive coverage, no clear lean toward priority topics
-- "mixed" — complex take with both pos/neg signal toward priority topics
-- If the post doesn't substantively touch any priority topic, use "neutral".
+- "positive" — author endorses, defends, or speaks favorably about whatever subject they raised
+- "negative" — author attacks, criticizes, or speaks unfavorably about whatever subject they raised
+- "neutral" — descriptive coverage, no clear lean
+- "mixed" — complex take with both pos/neg signal
+- For low-content posts (single emoji, link only, "lol") use "neutral".
 
 TOPIC_TAGS FIELD (intelligence mode):
-- Lowercase short tags identifying which priority topics the post touches.
-- Up to 5 tags. Use specific names where possible (e.g. "polymarket", "kalshi", "prediction_markets") not generic categories.
-- Empty array [] if no priority topic applies.` : ''}`;
+- Lowercase snake_case tags identifying what the post is ABOUT — broad themes, named entities, policy areas. Up to 6 tags.
+- This is for charting watcher chatter, not just priority-topic matches. Always emit tags when there's substantive content, even if the post is off-topic from priority_topics.
+- Examples: "polymarket", "kalshi", "prediction_markets", "iran_war", "gas_prices", "trump_approval", "dhs_funding", "nrcc", "tariffs", "fcc", "comms_jobs", "war_powers". Use the most specific named entity available; only fall back to category words when no named entity fits.
+- Empty array [] only for content-free posts (single emoji, bare link, single word).` : ''}`;
 
   const ageLine =
     typeof args.hoursOld === 'number' && Number.isFinite(args.hoursOld)
