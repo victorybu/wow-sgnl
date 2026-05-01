@@ -1,5 +1,15 @@
 import { anthropic } from './anthropic';
 
+export type RelevanceResult = {
+  score: number;
+  reason: string;
+  // Intelligence-mode only: how the author seems to view the topic
+  // (positive/negative/neutral/mixed) and which named topic tags
+  // apply. Drafting-mode calls leave both null.
+  sentiment: 'positive' | 'negative' | 'neutral' | 'mixed' | null;
+  topic_tags: string[] | null;
+};
+
 export async function scoreRelevance(args: {
   content: string;
   source: string;
@@ -7,10 +17,19 @@ export async function scoreRelevance(args: {
   priorityTopics: string;
   author?: string | null;
   hoursOld?: number | null;
-}): Promise<{ score: number; reason: string }> {
+  // 'drafting' (default) returns just score+reason. 'intelligence'
+  // also returns sentiment + topic_tags so /briefing can group by side
+  // and topic without a second model call.
+  mode?: 'drafting' | 'intelligence';
+}): Promise<RelevanceResult> {
+  const isIntel = args.mode === 'intelligence';
+
   const sys = `You score the relevance of news/social events for a digital strategy team running rapid response for a political principal.
 
-Output JSON only: {"score": <0-10 integer>, "reason": "<one sentence under 25 words>"}
+${isIntel
+  ? `Output JSON only: {"score": <0-10 integer>, "reason": "<one sentence under 25 words>", "sentiment": "<positive|negative|neutral|mixed>", "topic_tags": ["<tag1>", "<tag2>", ...]}`
+  : `Output JSON only: {"score": <0-10 integer>, "reason": "<one sentence under 25 words>"}`
+}
 
 PHILOSOPHY: Be ruthless. Most posts are noise. The principal can only act on a few things per week. Your job is to find genuine opportunities, not generate a list. When in doubt, score lower.
 
@@ -40,7 +59,19 @@ REWARD CRITERIA:
 
 Score the FINAL number after applying penalties and rewards. Cap at 0–10. Be honest about the math — a generic political tweet from a low-credibility account on an off-topic subject is a 0, not a 3.
 
-REASON FIELD: One sentence, under 25 words, naming the SPECIFIC priority-topic match (or lack thereof) and the time-sensitivity. Do not be generic.`;
+REASON FIELD: One sentence, under 25 words, naming the SPECIFIC priority-topic match (or lack thereof) and the time-sensitivity. Do not be generic.${isIntel ? `
+
+SENTIMENT FIELD (intelligence mode):
+- "positive" — author endorses, defends, or speaks favorably about a priority topic
+- "negative" — author attacks, criticizes, or speaks unfavorably about a priority topic
+- "neutral" — descriptive coverage, no clear lean toward priority topics
+- "mixed" — complex take with both pos/neg signal toward priority topics
+- If the post doesn't substantively touch any priority topic, use "neutral".
+
+TOPIC_TAGS FIELD (intelligence mode):
+- Lowercase short tags identifying which priority topics the post touches.
+- Up to 5 tags. Use specific names where possible (e.g. "polymarket", "kalshi", "prediction_markets") not generic categories.
+- Empty array [] if no priority topic applies.` : ''}`;
 
   const ageLine =
     typeof args.hoursOld === 'number' && Number.isFinite(args.hoursOld)
@@ -57,11 +88,11 @@ ${authorLine}
 ${ageLine}
 Content: ${args.content}
 
-Score this event using the rubric above. Apply anti-criteria and reward criteria explicitly.`;
+Score this event using the rubric above. Apply anti-criteria and reward criteria explicitly.${isIntel ? ' Also classify sentiment toward the priority topics and emit relevant topic_tags.' : ''}`;
 
   const resp = await anthropic.messages.create({
     model: 'claude-sonnet-4-5',
-    max_tokens: 400,
+    max_tokens: isIntel ? 600 : 400,
     system: sys,
     messages: [{ role: 'user', content: user }],
   });
@@ -70,9 +101,8 @@ Score this event using the rubric above. Apply anti-criteria and reward criteria
   const parsed = parseScoreResponse(text);
   if (parsed) return parsed;
 
-  // Last resort: pull the integer out of the response text. The model
-  // almost always names the score even when the JSON wrapper is busted.
-  // Better to land a real number than to leave the row at score=0.
+  // Last resort: pull the integer out of the response text. Better to
+  // land a real number than to leave the row at score=0.
   const m = text.match(/"score"\s*:\s*(\d+)|score(?:\s*(?:is|of|:))?\s*[:=]?\s*(\d+)/i);
   if (m) {
     const n = parseInt(m[1] || m[2] || '0', 10);
@@ -82,27 +112,25 @@ Score this event using the rubric above. Apply anti-criteria and reward criteria
       reason: reasonM
         ? reasonM[1].slice(0, 240)
         : `(parse-fallback) ${text.replace(/\s+/g, ' ').slice(0, 200)}`,
+      sentiment: null,
+      topic_tags: null,
     };
   }
-  return { score: 0, reason: 'parse_error' };
+  return { score: 0, reason: 'parse_error', sentiment: null, topic_tags: null };
 }
 
-// Try several strategies to extract the {score, reason} object from a
-// model response. The model usually returns clean JSON, but sometimes it
-// wraps in prose ("Here is the score: {...}"), uses smart quotes inside
-// the reason field, or truncates at max_tokens. Returns null when none
-// of the strategies find valid data.
-function parseScoreResponse(raw: string): { score: number; reason: string } | null {
+// Try several strategies to extract the {score, reason, sentiment?,
+// topic_tags?} object from a model response. The model usually returns
+// clean JSON, but sometimes it wraps in prose, uses smart quotes inside
+// the reason field, or truncates at max_tokens.
+function parseScoreResponse(raw: string): RelevanceResult | null {
   if (!raw) return null;
   const stripped = raw.replace(/```(?:json)?/g, '').trim();
 
   const candidates: string[] = [];
-  // 1. Whole response (already stripped of fences).
   candidates.push(stripped);
-  // 2. Any {...} block (greedy across newlines). Catches "Here's the score: {...}".
   const m = stripped.match(/\{[\s\S]*\}/);
   if (m) candidates.push(m[0]);
-  // 3. Truncated tail at max_tokens — close the brace if missing.
   const lastBrace = stripped.lastIndexOf('}');
   if (lastBrace === -1 && stripped.includes('{')) {
     candidates.push(stripped + '}');
@@ -116,6 +144,8 @@ function parseScoreResponse(raw: string): { score: number; reason: string } | nu
         return {
           score: Math.max(0, Math.min(10, score)),
           reason: String(parsed.reason || '').slice(0, 240),
+          sentiment: normalizeSentiment(parsed.sentiment),
+          topic_tags: normalizeTags(parsed.topic_tags),
         };
       }
     } catch {
@@ -123,4 +153,26 @@ function parseScoreResponse(raw: string): { score: number; reason: string } | nu
     }
   }
   return null;
+}
+
+function normalizeSentiment(s: any): RelevanceResult['sentiment'] {
+  if (typeof s !== 'string') return null;
+  const v = s.trim().toLowerCase();
+  if (v === 'positive' || v === 'negative' || v === 'neutral' || v === 'mixed') return v;
+  return null;
+}
+
+function normalizeTags(t: any): string[] | null {
+  if (!Array.isArray(t)) return null;
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const x of t) {
+    if (typeof x !== 'string') continue;
+    const norm = x.trim().toLowerCase().replace(/\s+/g, '_').slice(0, 40);
+    if (!norm || seen.has(norm)) continue;
+    seen.add(norm);
+    out.push(norm);
+    if (out.length >= 8) break;
+  }
+  return out.length > 0 ? out : null;
 }

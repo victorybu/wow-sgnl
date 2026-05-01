@@ -16,6 +16,8 @@ type EventRow = {
   created_at: string;
   relevance_score: number | null;
   relevance_reason: string | null;
+  sentiment: 'positive' | 'negative' | 'neutral' | 'mixed' | null;
+  topic_tags: string[] | null;
   audience_role: string | null;
   party: string | null;
 };
@@ -43,11 +45,19 @@ export default async function BriefingPage() {
   // from the watchlist row that matches author == value (case-insensitive).
   // LEFT JOIN so events from authors not on the watchlist (e.g. ingested
   // via x_keyword) still come through with audience_role=NULL.
+  // Topic-tagged events use a wider 7-day window so the operator can
+  // still see Polymarket/Kalshi/etc mentions even on a quiet day. The
+  // generic 24h window stays for top stories / DC sentiment.
   const r = await sql`
     SELECT e.id, e.author, e.content, e.url, e.posted_at, e.created_at,
            e.relevance_score, e.relevance_reason,
+           e.sentiment, e.topic_tags,
            w.audience_role,
-           w.party
+           w.party,
+           CASE
+             WHEN COALESCE(e.posted_at, e.created_at) >= NOW() - INTERVAL '24 hours' THEN TRUE
+             ELSE FALSE
+           END AS in_24h
     FROM events e
     LEFT JOIN LATERAL (
       SELECT audience_role, party
@@ -58,16 +68,17 @@ export default async function BriefingPage() {
       LIMIT 1
     ) w ON TRUE
     WHERE e.client_id = ${cid}
-      AND COALESCE(e.posted_at, e.created_at) >= NOW() - INTERVAL '24 hours'
+      AND COALESCE(e.posted_at, e.created_at) >= NOW() - INTERVAL '7 days'
       AND (e.feedback IS DISTINCT FROM 'noise')
     ORDER BY e.relevance_score DESC NULLS LAST,
              COALESCE(e.posted_at, e.created_at) DESC
-    LIMIT 200
+    LIMIT 400
   `;
-  const allEvents: EventRow[] = r.rows;
+  const allEvents: (EventRow & { in_24h?: boolean })[] = r.rows;
+  const last24h = allEvents.filter(e => e.in_24h);
 
-  // Section A: top stories — score>=7, clustered, top 5 clusters
-  const topPickRaw = allEvents.filter(e => (e.relevance_score ?? 0) >= 7).slice(0, 30);
+  // Section A: top stories — score>=7 in last 24h, clustered, top 5 clusters
+  const topPickRaw = last24h.filter(e => (e.relevance_score ?? 0) >= 7).slice(0, 30);
   const candidates: ClusterCandidate[] = topPickRaw.map(e => ({
     id: e.id,
     author: e.author,
@@ -89,23 +100,65 @@ export default async function BriefingPage() {
     .sort((a, b) => (b.primary.relevance_score ?? 0) - (a.primary.relevance_score ?? 0))
     .slice(0, 5);
 
-  // Section B: DC sentiment — score>=5, audience_role in staffer/journalist/official
-  const dcSentiment = allEvents.filter(e =>
+  // Section B: DC sentiment — score>=5, audience_role in staffer/journalist/official, last 24h
+  const dcSentiment = last24h.filter(e =>
     (e.relevance_score ?? 0) >= 5 &&
     (e.audience_role === 'staffer' || e.audience_role === 'journalist' || e.audience_role === 'official'),
   ).slice(0, 12);
 
-  // Section C: creator activity
-  const creators = allEvents.filter(e =>
+  // Section C: creator activity, last 24h
+  const creators = last24h.filter(e =>
     (e.relevance_score ?? 0) >= 5 && e.audience_role === 'creator',
   ).slice(0, 12);
 
+  // Section D: topic mentions — last 7 days, grouped by topic_tag.
+  // For each tag, count by sentiment + party, plus collect top quotes.
+  type TopicAgg = {
+    tag: string;
+    total: number;
+    by_sentiment: Record<string, number>;
+    by_party: Record<string, number>;
+    quotes: EventRow[];
+  };
+  const topicMap = new Map<string, TopicAgg>();
+  for (const e of allEvents) {
+    if (!e.topic_tags || e.topic_tags.length === 0) continue;
+    for (const tag of e.topic_tags) {
+      let agg = topicMap.get(tag);
+      if (!agg) {
+        agg = { tag, total: 0, by_sentiment: {}, by_party: {}, quotes: [] };
+        topicMap.set(tag, agg);
+      }
+      agg.total++;
+      const s = e.sentiment || 'neutral';
+      agg.by_sentiment[s] = (agg.by_sentiment[s] || 0) + 1;
+      const p = e.party || 'unsided';
+      agg.by_party[p] = (agg.by_party[p] || 0) + 1;
+      agg.quotes.push(e);
+    }
+  }
+  // Top quotes per tag: by score desc, posted_at desc, cap 5.
+  for (const agg of topicMap.values()) {
+    agg.quotes.sort((a, b) => {
+      const sa = a.relevance_score ?? 0;
+      const sb = b.relevance_score ?? 0;
+      if (sb !== sa) return sb - sa;
+      const ta = Date.parse(a.posted_at || a.created_at) || 0;
+      const tb = Date.parse(b.posted_at || b.created_at) || 0;
+      return tb - ta;
+    });
+    agg.quotes = agg.quotes.slice(0, 5);
+  }
+  const topicAggs = Array.from(topicMap.values()).sort((a, b) => b.total - a.total);
+
   const totals = {
-    last24h: allEvents.length,
+    last24h: last24h.length,
+    last7d: allEvents.length,
     topPicks: topPickRaw.length,
     clusters: clusters.length,
     dc: dcSentiment.length,
     creators: creators.length,
+    tagged: allEvents.filter(e => e.topic_tags && e.topic_tags.length > 0).length,
   };
 
   return (
@@ -120,18 +173,86 @@ export default async function BriefingPage() {
 
       <h1 className="text-2xl font-bold mb-1">{client.name} · Briefing</h1>
       <p className="text-sm opacity-60 mb-6">
-        Live intelligence digest · last 24h
+        Live intelligence digest · top stories last 24h · topic mentions last 7d
       </p>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-8">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-8">
         <Stat label="Events 24h" value={totals.last24h} />
         <Stat label="Score 7+" value={totals.topPicks} />
         <Stat label="Clusters" value={totals.clusters} />
         <Stat label="DC voices" value={totals.dc} />
         <Stat label="Creators" value={totals.creators} />
+        <Stat label="Tagged 7d" value={totals.tagged} />
       </div>
 
-      <Section title="Top stories" sub="score 7+, clustered">
+      <Section title="Topic mentions" sub="last 7 days · grouped by tag">
+        {topicAggs.length === 0 ? (
+          <Empty msg="No tagged mentions yet. Sentiment + topic_tags are written when polling scores intelligence-mode events; once tweets land in the next cron cycles, this section populates." />
+        ) : (
+          <div className="space-y-4">
+            {topicAggs.map(agg => (
+              <article key={agg.tag} className="border border-purple-500/30 bg-purple-500/5 rounded-lg p-4">
+                <div className="flex items-baseline gap-2 mb-3 flex-wrap">
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-purple-300">
+                    {agg.tag.replace(/_/g, ' ')}
+                  </h3>
+                  <span className="text-xs opacity-50">{agg.total} mention{agg.total === 1 ? '' : 's'}</span>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 mb-3 text-xs">
+                  <SentimentPill kind="positive" n={agg.by_sentiment.positive || 0} />
+                  <SentimentPill kind="negative" n={agg.by_sentiment.negative || 0} />
+                  <SentimentPill kind="neutral" n={agg.by_sentiment.neutral || 0} />
+                  <SentimentPill kind="mixed" n={agg.by_sentiment.mixed || 0} />
+                  <span className="opacity-30 mx-1">·</span>
+                  {Object.entries(agg.by_party).filter(([p]) => p !== 'unsided').map(([p, n]) => (
+                    <span key={p} className={`px-2 py-0.5 rounded border ${partyClass(p)}`}>
+                      {p}: {n}
+                    </span>
+                  ))}
+                  {agg.by_party.unsided > 0 && (
+                    <span className="px-2 py-0.5 rounded border border-neutral-700 bg-neutral-900 text-neutral-400">
+                      unsided: {agg.by_party.unsided}
+                    </span>
+                  )}
+                </div>
+
+                <ul className="space-y-2">
+                  {agg.quotes.map(q => (
+                    <li key={q.id} className="text-xs border-l-2 border-purple-500/20 pl-3">
+                      <div className="flex items-center gap-1.5 mb-0.5 flex-wrap opacity-70">
+                        <SentimentBadge s={q.sentiment} />
+                        {q.author && (
+                          <a href={`https://x.com/${q.author}`} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                            @{q.author}
+                          </a>
+                        )}
+                        {q.audience_role && (
+                          <span className="text-[10px] uppercase px-1 py-0.5 rounded bg-neutral-800 border border-neutral-700">
+                            {q.audience_role}
+                          </span>
+                        )}
+                        {q.party && (
+                          <span className={`text-[10px] uppercase px-1 py-0.5 rounded border ${partyClass(q.party)}`}>
+                            {q.party}
+                          </span>
+                        )}
+                        <span className="opacity-50">·</span>
+                        <span className="opacity-50">{timeAgo(q.posted_at || q.created_at)}</span>
+                        <span className="opacity-50">·</span>
+                        <Link href={`/event/${q.id}`} className="underline opacity-70 hover:opacity-100">open</Link>
+                      </div>
+                      <p className="opacity-90 line-clamp-3 whitespace-pre-wrap">{q.content}</p>
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            ))}
+          </div>
+        )}
+      </Section>
+
+      <Section title="Top stories" sub="score 7+, clustered, last 24h">
         {stories.length === 0 ? (
           <Empty msg="No score≥7 events in the last 24h. Either the feed is quiet or nothing is hitting the bar yet." />
         ) : (
@@ -160,6 +281,7 @@ export default async function BriefingPage() {
                       {s.primary.party}
                     </span>
                   )}
+                  <SentimentBadge s={s.primary.sentiment} />
                   <span className="opacity-50">{timeAgo(s.primary.posted_at || s.primary.created_at)}</span>
                 </header>
                 <p className="text-sm whitespace-pre-wrap leading-relaxed">{s.primary.content}</p>
@@ -244,6 +366,36 @@ function Empty({ msg }: { msg: string }) {
   return <p className="text-sm opacity-50 italic">{msg}</p>;
 }
 
+function SentimentPill({ kind, n }: { kind: 'positive' | 'negative' | 'neutral' | 'mixed'; n: number }) {
+  if (n === 0) return null;
+  const cls =
+    kind === 'positive' ? 'border-green-500/40 bg-green-500/10 text-green-200' :
+    kind === 'negative' ? 'border-red-500/40 bg-red-500/10 text-red-200' :
+    kind === 'mixed' ? 'border-yellow-500/40 bg-yellow-500/10 text-yellow-200' :
+    'border-neutral-700 bg-neutral-900 text-neutral-300';
+  const label = kind === 'positive' ? '+' : kind === 'negative' ? '−' : kind === 'mixed' ? '±' : '·';
+  return (
+    <span className={`px-2 py-0.5 rounded border ${cls}`}>
+      {label} {kind}: {n}
+    </span>
+  );
+}
+
+function SentimentBadge({ s }: { s: 'positive' | 'negative' | 'neutral' | 'mixed' | null }) {
+  if (!s) return null;
+  const cls =
+    s === 'positive' ? 'bg-green-500/20 text-green-300 border-green-500/40' :
+    s === 'negative' ? 'bg-red-500/20 text-red-300 border-red-500/40' :
+    s === 'mixed' ? 'bg-yellow-500/20 text-yellow-300 border-yellow-500/40' :
+    'bg-neutral-800 text-neutral-400 border-neutral-700';
+  const sym = s === 'positive' ? '+' : s === 'negative' ? '−' : s === 'mixed' ? '±' : '·';
+  return (
+    <span className={`text-[10px] font-bold w-4 h-4 inline-flex items-center justify-center rounded border ${cls}`}>
+      {sym}
+    </span>
+  );
+}
+
 function partyClass(p: string): string {
   if (p === 'D') return 'border-blue-500/40 bg-blue-500/10 text-blue-200';
   if (p === 'R') return 'border-red-500/40 bg-red-500/10 text-red-200';
@@ -273,6 +425,7 @@ function CompactRow({ ev }: { ev: EventRow }) {
             {ev.party}
           </span>
         )}
+        <SentimentBadge s={ev.sentiment} />
         <span className="opacity-50">·</span>
         <span className="opacity-50">{timeAgo(ev.posted_at || ev.created_at)}</span>
         <span className="flex-1" />

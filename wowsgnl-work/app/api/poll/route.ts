@@ -62,7 +62,7 @@ export async function GET() {
   const unscored = await sql`
     SELECT e.id, e.client_id, e.source, e.content, e.author,
            e.posted_at, e.created_at,
-           c.name as client_name, c.priority_topics
+           c.name as client_name, c.priority_topics, c.mode
     FROM events e JOIN clients c ON c.id = e.client_id
     WHERE e.relevance_score IS NULL
     ORDER BY e.created_at DESC, e.id DESC
@@ -81,8 +81,16 @@ export async function GET() {
         priorityTopics: e.priority_topics || '',
         author: e.author,
         hoursOld,
+        mode: e.mode === 'intelligence' ? 'intelligence' : 'drafting',
       });
-      await sql`UPDATE events SET relevance_score = ${r.score}, relevance_reason = ${r.reason} WHERE id = ${e.id}`;
+      await sql`
+        UPDATE events
+        SET relevance_score = ${r.score},
+            relevance_reason = ${r.reason},
+            sentiment = ${r.sentiment},
+            topic_tags = ${r.topic_tags}
+        WHERE id = ${e.id}
+      `;
       if (r.score < 5) await sql`UPDATE events SET status = 'ignored' WHERE id = ${e.id}`;
       scored++;
     } catch (err: any) {

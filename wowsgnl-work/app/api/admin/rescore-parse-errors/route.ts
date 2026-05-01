@@ -25,7 +25,7 @@ export async function POST(req: Request) {
   if (clientId > 0) {
     const r = await sql`
       SELECT e.id, e.content, e.author, e.source, e.posted_at, e.created_at,
-             c.name AS client_name, c.priority_topics
+             c.name AS client_name, c.priority_topics, c.mode
       FROM events e JOIN clients c ON c.id = e.client_id
       WHERE e.client_id = ${clientId} AND e.relevance_reason = 'parse_error'
       ORDER BY e.created_at DESC
@@ -35,7 +35,7 @@ export async function POST(req: Request) {
   } else {
     const r = await sql`
       SELECT e.id, e.content, e.author, e.source, e.posted_at, e.created_at,
-             c.name AS client_name, c.priority_topics
+             c.name AS client_name, c.priority_topics, c.mode
       FROM events e JOIN clients c ON c.id = e.client_id
       WHERE e.relevance_reason = 'parse_error'
       ORDER BY e.created_at DESC
@@ -51,16 +51,21 @@ export async function POST(req: Request) {
     const refTs = ev.posted_at || ev.created_at;
     const hoursOld = refTs ? (Date.now() - Date.parse(refTs)) / 3_600_000 : null;
     try {
-      const { score, reason } = await scoreRelevance({
+      const { score, reason, sentiment, topic_tags } = await scoreRelevance({
         content: ev.content,
         source: ev.source || 'twitter',
         clientName: ev.client_name,
         priorityTopics: ev.priority_topics || '',
         author: ev.author,
         hoursOld,
+        mode: ev.mode === 'intelligence' ? 'intelligence' : 'drafting',
       });
       await sql`
-        UPDATE events SET relevance_score = ${score}, relevance_reason = ${reason}
+        UPDATE events
+        SET relevance_score = ${score},
+            relevance_reason = ${reason},
+            sentiment = ${sentiment},
+            topic_tags = ${topic_tags}
         WHERE id = ${ev.id}
       `;
       if (reason === 'parse_error') {

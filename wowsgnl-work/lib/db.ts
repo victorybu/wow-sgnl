@@ -160,4 +160,16 @@ export async function initSchema() {
     );
   `;
   await sql`CREATE INDEX IF NOT EXISTS briefings_client_date_idx ON briefings(client_id, briefing_date DESC);`;
+  await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS sentiment TEXT`;
+  await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS topic_tags TEXT[]`;
+  await sql`CREATE INDEX IF NOT EXISTS events_sentiment_idx ON events(client_id, sentiment) WHERE sentiment IS NOT NULL;`;
+  await sql`CREATE INDEX IF NOT EXISTS events_topic_tags_idx ON events USING GIN (topic_tags) WHERE topic_tags IS NOT NULL;`;
+  // Idempotent: backfill Polymarket priority_topics with Kalshi (the
+  // competitor) and direct-name terms so the relevance scorer fires
+  // on tweets actually mentioning the product.
+  await sql`
+    UPDATE clients
+    SET priority_topics = 'prediction markets, polymarket, kalshi, prediction market regulation, election odds, betting volume, political risk, CFTC, DC chatter on prediction markets'
+    WHERE name = 'Polymarket' AND priority_topics NOT LIKE '%kalshi%'
+  `;
 }
