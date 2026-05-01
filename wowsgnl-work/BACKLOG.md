@@ -41,7 +41,7 @@ I add items via the GitHub mobile editor or laptop anytime — Claude picks them
 - [x] **Item 2 — Recalibrate scoring** — `shipped` 2026-04-30 (commit 0c81597; 7+ rate 13.5% → 3.6%)
 - [x] **Item 3 — Auto-seed voice from historical performance** — `shipped` 2026-05-01 (commit 7114bed; 606 imports for @RepRoKhanna, 31 gold)
 - [x] **Item 4 — Automated engagement capture post-ship** — `shipped` 2026-05-01 (commit f9046e9; daily cron at 14:00 UTC)
-- [ ] **Item 5 — Mobile PWA** — `in-progress` since 2026-05-01
+- [x] **Item 5 — Mobile PWA** — `shipped` 2026-05-01 (commit 73a6666)
 - [ ] Item 6 — Topic clustering on Top Picks — `queued`
 - [ ] Item 7 — Anti-voice examples — `queued`
 - [ ] Item 8 — Intelligence-mode briefing page — `queued`
