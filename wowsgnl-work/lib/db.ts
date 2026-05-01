@@ -145,4 +145,17 @@ export async function initSchema() {
     );
   `;
   await sql`CREATE INDEX IF NOT EXISTS top_pick_clusters_client_idx ON top_pick_clusters(client_id);`;
+  await sql`ALTER TABLE watchlist ADD COLUMN IF NOT EXISTS audience_role TEXT`;
+  await sql`CREATE INDEX IF NOT EXISTS watchlist_audience_role_idx ON watchlist(client_id, audience_role) WHERE audience_role IS NOT NULL;`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS briefings (
+      id SERIAL PRIMARY KEY,
+      client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,
+      briefing_date DATE NOT NULL,
+      content JSONB NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(client_id, briefing_date)
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS briefings_client_date_idx ON briefings(client_id, briefing_date DESC);`;
 }
