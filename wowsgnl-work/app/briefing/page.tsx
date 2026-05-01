@@ -111,6 +111,21 @@ export default async function BriefingPage() {
     (e.relevance_score ?? 0) >= 5 && e.audience_role === 'creator',
   ).slice(0, 12);
 
+  // Priority-keyword set (hoisted above dayBuckets so the timeline
+  // can use it). Tokenize client.priority_topics — strip punctuation,
+  // lowercase, drop stopwords. A topic_tag is "priority" if any of
+  // its underscore-split tokens overlap with this set.
+  const priorityKeywords: Set<string> = (() => {
+    const raw = (client.priority_topics || '').toLowerCase();
+    const tokens = raw.split(/[^a-z0-9]+/).filter(Boolean);
+    const stop = new Set(['the', 'and', 'or', 'on', 'of', 'for', 'in', 'to', 'a', 'an', 'with', 'about', 'chatter']);
+    return new Set(tokens.filter(t => t.length >= 3 && !stop.has(t)));
+  })();
+  function isPriorityTag(tag: string): boolean {
+    const tokens = tag.split('_');
+    return tokens.some(t => priorityKeywords.has(t));
+  }
+
   // Section D: topic mentions — last 7 days, grouped by topic_tag.
   // For each tag, count by sentiment + party, plus collect top quotes.
   type TopicAgg = {
@@ -137,47 +152,35 @@ export default async function BriefingPage() {
       agg.quotes.push(e);
     }
   }
-  // Top quotes per tag: by score desc, posted_at desc, cap 5.
+  // Top quotes per tag: drop score=0 (waste-of-time per Caleb), then
+  // sort by score desc + posted_at desc, cap 5.
   for (const agg of topicMap.values()) {
-    agg.quotes.sort((a, b) => {
-      const sa = a.relevance_score ?? 0;
-      const sb = b.relevance_score ?? 0;
-      if (sb !== sa) return sb - sa;
-      const ta = Date.parse(a.posted_at || a.created_at) || 0;
-      const tb = Date.parse(b.posted_at || b.created_at) || 0;
-      return tb - ta;
-    });
-    agg.quotes = agg.quotes.slice(0, 5);
+    agg.quotes = agg.quotes
+      .filter(q => (q.relevance_score ?? 0) > 0)
+      .sort((a, b) => {
+        const sa = a.relevance_score ?? 0;
+        const sb = b.relevance_score ?? 0;
+        if (sb !== sa) return sb - sa;
+        const ta = Date.parse(a.posted_at || a.created_at) || 0;
+        const tb = Date.parse(b.posted_at || b.created_at) || 0;
+        return tb - ta;
+      })
+      .slice(0, 5);
   }
-  // Priority-match highlighting. Compute the rough set of keywords
-  // this client cares about by tokenizing client.priority_topics —
-  // strip punctuation, lowercase, dedupe, drop stopwords. A topic_tag
-  // is "priority" if any of its words overlap with this set. Used to
-  // pin priority cards at the top of the section and badge them so
-  // the user can spot prediction-market chatter inside a sea of
-  // general DC-staffer chatter.
-  const priorityKeywords: Set<string> = (() => {
-    const raw = (client.priority_topics || '').toLowerCase();
-    const tokens = raw.split(/[^a-z0-9]+/).filter(Boolean);
-    const stop = new Set(['the', 'and', 'or', 'on', 'of', 'for', 'in', 'to', 'a', 'an', 'with', 'about', 'chatter']);
-    return new Set(tokens.filter(t => t.length >= 3 && !stop.has(t)));
-  })();
-  function isPriorityTag(tag: string): boolean {
-    const tokens = tag.split('_');
-    return tokens.some(t => priorityKeywords.has(t));
-  }
-  const topicAggs = Array.from(topicMap.values()).sort((a, b) => {
-    const pa = isPriorityTag(a.tag) ? 1 : 0;
-    const pb = isPriorityTag(b.tag) ? 1 : 0;
-    if (pa !== pb) return pb - pa; // priority first
-    return b.total - a.total;       // then by volume
-  });
+  // Only keep priority-matched tags. Caleb's call: he's checking
+  // /briefing for prediction-market sentiment, not general DC chatter.
+  // The hand-tagged staffer accounts produce a flood of off-topic
+  // content (gas prices, congress, trump approval) that buries the
+  // signal. Priority-only here turns the section into a focused
+  // "Polymarket / Kalshi / prediction-market" lens.
+  const topicAggs = Array.from(topicMap.values())
+    .filter(agg => isPriorityTag(agg.tag))
+    .sort((a, b) => b.total - a.total);
 
-  // 7-day tagged-event timeline (newest day on the right). Each bucket
-  // is a calendar day in UTC; we render an ASCII sparkline so the
-  // operator can see at a glance whether activity is rising / falling
-  // / spiked yesterday. Bucket count is small (7) so we precompute
-  // here and let the component just render the strings.
+  // 7-day priority-mention timeline (newest day on the right). Counts
+  // events that have AT LEAST ONE priority-matched topic_tag so the
+  // sparkline tracks "prediction-market chatter activity," not generic
+  // staffer posting volume.
   const dayBuckets: { label: string; count: number }[] = [];
   for (let i = 6; i >= 0; i--) {
     const day = new Date(Date.now() - i * 86_400_000);
@@ -185,6 +188,7 @@ export default async function BriefingPage() {
     const dayEnd = new Date(dayStart.getTime() + 86_400_000);
     const count = allEvents.filter(e => {
       if (!e.topic_tags || e.topic_tags.length === 0) return false;
+      if (!e.topic_tags.some(t => isPriorityTag(t))) return false;
       const ts = Date.parse(e.posted_at || e.created_at);
       return Number.isFinite(ts) && ts >= dayStart.getTime() && ts < dayEnd.getTime();
     }).length;
@@ -232,9 +236,9 @@ export default async function BriefingPage() {
         </div>
       )}
 
-      <Section title="Topic mentions" sub="last 7 days · grouped by tag">
+      <Section title="Priority mentions" sub="last 7 days · prediction-market topics only">
         {topicAggs.length === 0 ? (
-          <Empty msg="No tagged mentions yet. Sentiment + topic_tags are written when polling scores intelligence-mode events; once tweets land in the next cron cycles, this section populates." />
+          <Empty msg="No priority-topic mentions in the last 7 days. Watchers haven't tweeted about prediction markets, Polymarket, Kalshi, CFTC, or election odds yet — keyword watchers are listening for new mentions across the open feed." />
         ) : (
           <div className="space-y-4">
             {topicAggs.map(agg => {
