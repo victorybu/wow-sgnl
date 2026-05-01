@@ -1,5 +1,6 @@
 import { sql } from '@/lib/db';
 import { getCurrentClient } from '@/lib/clients';
+import { getClustersForTopPicks, ClusterCandidate } from '@/lib/clusters';
 import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
@@ -188,7 +189,8 @@ export async function GET(req: Request) {
       (SELECT COUNT(*)::int FROM events WHERE client_id = ${cid} AND feedback = 'noise') AS muted
   `;
 
-  // Top picks only for drafting-mode clients (intelligence mode has /briefing instead)
+  // Top picks only for drafting-mode clients (intelligence mode has /briefing instead).
+  // Pull up to 30 qualifying candidates, cluster them, then return top 5 clusters.
   let topPicks: any[] = [];
   if (client.mode === 'drafting') {
     const tp = await sql`
@@ -214,9 +216,55 @@ export async function GET(req: Request) {
         AND (e.feedback IS DISTINCT FROM 'noise')
         AND COALESCE(e.posted_at, e.created_at) >= NOW() - INTERVAL '6 hours'
       ORDER BY e.relevance_score DESC, COALESCE(e.posted_at, e.created_at) DESC
-      LIMIT 5
+      LIMIT 30
     `;
-    topPicks = tp.rows;
+    const rows: any[] = tp.rows;
+
+    if (rows.length > 0) {
+      const candidates: ClusterCandidate[] = rows.map(r => ({
+        id: r.id,
+        author: r.author,
+        content: r.content,
+        relevance_score: r.relevance_score,
+      }));
+      const clusters = await getClustersForTopPicks(cid, candidates);
+      const byId = new Map<number, any>();
+      for (const r of rows) byId.set(r.id, r);
+
+      const picks = clusters
+        .map(c => {
+          const primary = byId.get(c.primary_event_id);
+          if (!primary) return null;
+          const related = c.related_event_ids
+            .map(rid => byId.get(rid))
+            .filter(Boolean)
+            .map(r => ({
+              id: r.id,
+              author: r.author,
+              content: r.content,
+              url: r.url,
+              posted_at: r.posted_at,
+              created_at: r.created_at,
+            }));
+          return {
+            cluster_topic: c.cluster_topic,
+            ...primary,
+            related,
+          };
+        })
+        .filter(Boolean) as any[];
+
+      picks.sort((a, b) => {
+        const sa = a.relevance_score ?? 0;
+        const sb = b.relevance_score ?? 0;
+        if (sb !== sa) return sb - sa;
+        const ta = Date.parse(a.posted_at || a.created_at) || 0;
+        const tb = Date.parse(b.posted_at || b.created_at) || 0;
+        return tb - ta;
+      });
+
+      topPicks = picks.slice(0, 5);
+    }
   }
 
   return NextResponse.json({

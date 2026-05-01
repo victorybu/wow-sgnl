@@ -42,7 +42,7 @@ I add items via the GitHub mobile editor or laptop anytime — Claude picks them
 - [x] **Item 3 — Auto-seed voice from historical performance** — `shipped` 2026-05-01 (commit 7114bed; 606 imports for @RepRoKhanna, 31 gold)
 - [x] **Item 4 — Automated engagement capture post-ship** — `shipped` 2026-05-01 (commit f9046e9; daily cron at 14:00 UTC)
 - [x] **Item 5 — Mobile PWA** — `shipped` 2026-05-01 (commit 73a6666)
-- [ ] Item 6 — Topic clustering on Top Picks — `queued`
+- [ ] **Item 6 — Topic clustering on Top Picks** — `in-progress` since 2026-05-01
 - [ ] Item 7 — Anti-voice examples — `queued`
 - [ ] Item 8 — Intelligence-mode briefing page — `queued`
 - [ ] Item 9 — Standing Brief on homepage — `queued`

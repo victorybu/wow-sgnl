@@ -131,4 +131,15 @@ export async function initSchema() {
   await sql`ALTER TABLE voice_examples ADD COLUMN IF NOT EXISTS engagement_fetched_at TIMESTAMPTZ`;
   await sql`ALTER TABLE voice_examples ADD COLUMN IF NOT EXISTS auto_weight_reason TEXT`;
   await sql`CREATE INDEX IF NOT EXISTS voice_examples_shipped_tweet_idx ON voice_examples(shipped_tweet_id) WHERE shipped_tweet_id IS NOT NULL;`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS top_pick_clusters (
+      id SERIAL PRIMARY KEY,
+      client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,
+      signature TEXT NOT NULL,
+      clusters JSONB NOT NULL,
+      computed_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(client_id)
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS top_pick_clusters_client_idx ON top_pick_clusters(client_id);`;
 }

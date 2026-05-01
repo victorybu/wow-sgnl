@@ -34,8 +34,18 @@ type DraftSummary = {
   shipped_count: number;
 };
 
+type RelatedEvent = {
+  id: number;
+  author: string | null;
+  content: string;
+  url: string | null;
+  posted_at: string | null;
+  created_at: string;
+};
+
 type TopPick = {
   id: number;
+  cluster_topic: string | null;
   author: string | null;
   content: string;
   url: string | null;
@@ -47,6 +57,7 @@ type TopPick = {
   client_name: string;
   is_shipped: boolean;
   drafts: DraftSummary[];
+  related: RelatedEvent[];
 };
 
 type Payload = {
@@ -228,7 +239,9 @@ export default function Home() {
             <h2 className="text-sm font-bold uppercase tracking-wide text-green-300">
               Top picks · last 6h
             </h2>
-            <span className="text-xs opacity-50">{data.top_picks.length} ready to draft</span>
+            <span className="text-xs opacity-50">
+              {data.top_picks.length} cluster{data.top_picks.length === 1 ? '' : 's'} ready to draft
+            </span>
           </div>
           <div className="space-y-3">
             {data.top_picks.map(p => (
@@ -536,12 +549,21 @@ function EventCard({
 
 
 function TopPickCard({ pick: p }: { pick: TopPick }) {
+  const [showRelated, setShowRelated] = useState(false);
   const scoreCls =
     p.relevance_score !== null && p.relevance_score >= 7
       ? "bg-green-500/20 text-green-300 border border-green-500/40"
       : "bg-yellow-500/15 text-yellow-300 border border-yellow-500/40";
+  const isCluster = p.related.length > 0;
+  const relatedAuthors = p.related.slice(0, 3).map(r => `@${r.author || '?'}`).join(', ');
+  const moreCount = p.related.length > 3 ? p.related.length - 3 : 0;
   return (
     <article className="border border-green-500/30 bg-green-500/5 rounded-lg p-4">
+      {isCluster && p.cluster_topic && (
+        <div className="text-xs uppercase tracking-wider font-semibold text-green-300/80 mb-2">
+          {p.cluster_topic}
+        </div>
+      )}
       <header className="flex items-center gap-2 flex-wrap mb-2">
         <span className={`text-sm font-bold px-2 py-0.5 rounded ${scoreCls}`}>
           {p.relevance_score ?? "?"}/10
@@ -567,6 +589,55 @@ function TopPickCard({ pick: p }: { pick: TopPick }) {
       <p className="text-sm whitespace-pre-wrap mb-2 leading-relaxed">{p.content}</p>
       {p.relevance_reason && (
         <p className="text-xs opacity-60 italic mb-3">{p.relevance_reason}</p>
+      )}
+
+      {isCluster && (
+        <div className="mb-3">
+          <button
+            onClick={() => setShowRelated(s => !s)}
+            className="text-xs text-green-300/80 hover:text-green-300 underline"
+          >
+            +{p.related.length} from {relatedAuthors}
+            {moreCount > 0 ? ` +${moreCount} more` : ''}
+            {showRelated ? ' ▲' : ' ▼'}
+          </button>
+          {showRelated && (
+            <ul className="mt-2 space-y-2 border-l-2 border-green-500/20 pl-3">
+              {p.related.map(r => (
+                <li key={r.id} className="text-xs">
+                  <div className="flex items-center gap-1.5 mb-0.5 opacity-70">
+                    {r.author && (
+                      <a
+                        href={`https://x.com/${r.author}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="hover:underline"
+                      >
+                        @{r.author}
+                      </a>
+                    )}
+                    <span className="opacity-50">·</span>
+                    <span className="opacity-50">{timeAgo(r.posted_at || r.created_at)}</span>
+                    {r.url && (
+                      <>
+                        <span className="opacity-50">·</span>
+                        <a
+                          href={r.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="hover:underline opacity-70"
+                        >
+                          open ↗
+                        </a>
+                      </>
+                    )}
+                  </div>
+                  <p className="opacity-80 line-clamp-3 whitespace-pre-wrap">{r.content}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
 
       {p.drafts.length === 0 ? (
