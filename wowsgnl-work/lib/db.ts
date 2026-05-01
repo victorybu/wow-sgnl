@@ -185,4 +185,196 @@ export async function initSchema() {
   // transparent in the UI ("7 +1 cluster = 8").
   await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS cluster_boost INTEGER DEFAULT 0`;
   await sql`CREATE INDEX IF NOT EXISTS events_cluster_boost_idx ON events(client_id, cluster_boost) WHERE cluster_boost > 0;`;
+
+  // -- POLYMARKET RETAINER (client_id = 4) ---------------------------
+  // pg_trgm powers the touchpoint-parser fuzzy match in /api/polymarket/touchpoints.
+  await sql`CREATE EXTENSION IF NOT EXISTS pg_trgm`;
+
+  // Kalshi opp-research targets — names + orgs to flag in donations,
+  // FEC filings, and dossier entries.
+  await sql`
+    CREATE TABLE IF NOT EXISTS pm_kalshi_targets (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      role TEXT,
+      organization TEXT,
+      notes TEXT,
+      added_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `;
+
+  // Running Kalshi dossier: one row per Kalshi development with
+  // pattern read + suggested counter-move. event_id links to the
+  // primary source signal (multi-source clusters live in pm_intel_items).
+  await sql`
+    CREATE TABLE IF NOT EXISTS pm_kalshi_dossier (
+      id SERIAL PRIMARY KEY,
+      event_id INTEGER REFERENCES events(id) ON DELETE SET NULL,
+      category TEXT NOT NULL,
+      headline TEXT NOT NULL,
+      details TEXT NOT NULL,
+      pattern_read TEXT,
+      counter_move TEXT,
+      occurred_at TIMESTAMPTZ,
+      source_url TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS pm_kalshi_dossier_occurred_idx ON pm_kalshi_dossier(occurred_at DESC);`;
+  await sql`CREATE INDEX IF NOT EXISTS pm_kalshi_dossier_category_idx ON pm_kalshi_dossier(category, occurred_at DESC);`;
+
+  // Polymarket-scoped intel items shown on the /polymarket dashboard.
+  // signal_event_ids[] holds every events.id that this row synthesizes
+  // (one row per dedup_cluster_key from the score prompt).
+  await sql`
+    CREATE TABLE IF NOT EXISTS pm_intel_items (
+      id SERIAL PRIMARY KEY,
+      signal_event_ids INTEGER[],
+      category TEXT NOT NULL,
+      headline TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      analysis TEXT,
+      valence INTEGER,
+      priority INTEGER,
+      topic_tags TEXT[],
+      action_hint TEXT,
+      source_links JSONB,
+      for_date DATE NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS pm_intel_items_for_date_idx ON pm_intel_items(for_date DESC, category, priority);`;
+
+  // People CRM. pending_review = TRUE when fuzzy-created from a
+  // touchpoint parse with low confidence — UI surfaces these for
+  // Caleb to confirm / merge / rename.
+  await sql`
+    CREATE TABLE IF NOT EXISTS pm_people (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      role TEXT,
+      employer TEXT,
+      lane TEXT,
+      twitter_handle TEXT,
+      email TEXT,
+      posture TEXT DEFAULT 'unknown',
+      posture_note TEXT,
+      last_touched TIMESTAMPTZ,
+      priority BOOLEAN DEFAULT FALSE,
+      pending_review BOOLEAN DEFAULT FALSE,
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS pm_people_last_touched_idx ON pm_people(last_touched DESC NULLS LAST);`;
+  await sql`CREATE INDEX IF NOT EXISTS pm_people_pending_idx ON pm_people(pending_review) WHERE pending_review = TRUE;`;
+  // Trigram index for fuzzy match against name+role+employer at
+  // touchpoint-parse time.
+  await sql`CREATE INDEX IF NOT EXISTS pm_people_trgm_idx ON pm_people USING GIN ((name || ' ' || COALESCE(role, '') || ' ' || COALESCE(employer, '')) gin_trgm_ops);`;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS pm_touchpoints (
+      id SERIAL PRIMARY KEY,
+      occurred_at TIMESTAMPTZ DEFAULT NOW(),
+      raw_note TEXT NOT NULL,
+      context TEXT,
+      summary TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS pm_touchpoint_people (
+      touchpoint_id INTEGER REFERENCES pm_touchpoints(id) ON DELETE CASCADE,
+      person_id INTEGER REFERENCES pm_people(id) ON DELETE CASCADE,
+      notes TEXT,
+      PRIMARY KEY (touchpoint_id, person_id)
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS pm_touchpoint_people_person_idx ON pm_touchpoint_people(person_id);`;
+
+  // Partnerships pipeline.
+  await sql`
+    CREATE TABLE IF NOT EXISTS pm_partnerships (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      handle TEXT,
+      platforms TEXT[],
+      follower_count INTEGER,
+      lane TEXT,
+      status TEXT DEFAULT 'prospecting',
+      last_action_at TIMESTAMPTZ,
+      last_action_note TEXT,
+      next_action TEXT,
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS pm_partnerships_status_idx ON pm_partnerships(status, last_action_at DESC NULLS LAST);`;
+
+  // Events tracking (NB: name conflicts with the existing top-level
+  // events table that holds raw signals — pm_events is the *event /
+  // panel / reception calendar*, not news events).
+  await sql`
+    CREATE TABLE IF NOT EXISTS pm_events (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      host TEXT,
+      event_date DATE,
+      location TEXT,
+      audience TEXT,
+      category TEXT,
+      sponsor_tier_estimate TEXT,
+      kalshi_present BOOLEAN DEFAULT FALSE,
+      polymarket_should_attend TEXT,
+      rationale TEXT,
+      source_url TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS pm_events_date_idx ON pm_events(event_date);`;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS pm_kalshi_appearances (
+      id SERIAL PRIMARY KEY,
+      appearance_type TEXT,
+      event_or_show TEXT,
+      who TEXT,
+      date DATE,
+      details TEXT,
+      source_url TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS pm_kalshi_appearances_date_idx ON pm_kalshi_appearances(date DESC);`;
+
+  // Daily artifacts.
+  await sql`
+    CREATE TABLE IF NOT EXISTS pm_daily_briefs (
+      id SERIAL PRIMARY KEY,
+      for_date DATE NOT NULL UNIQUE,
+      signal_update_text TEXT,
+      what_changed_text TEXT,
+      generated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS pm_weekly_digests (
+      id SERIAL PRIMARY KEY,
+      week_starting DATE NOT NULL UNIQUE,
+      pdf_url TEXT,
+      summary_text TEXT,
+      generated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS pm_monthly_memos (
+      id SERIAL PRIMARY KEY,
+      month DATE NOT NULL UNIQUE,
+      pdf_url TEXT,
+      summary_text TEXT,
+      generated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `;
 }
