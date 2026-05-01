@@ -61,20 +61,66 @@ Score this event using the rubric above. Apply anti-criteria and reward criteria
 
   const resp = await anthropic.messages.create({
     model: 'claude-sonnet-4-5',
-    max_tokens: 250,
+    max_tokens: 400,
     system: sys,
     messages: [{ role: 'user', content: user }],
   });
 
   const text = resp.content[0].type === 'text' ? resp.content[0].text : '';
-  const clean = text.replace(/```json|```/g, '').trim();
-  try {
-    const parsed = JSON.parse(clean);
+  const parsed = parseScoreResponse(text);
+  if (parsed) return parsed;
+
+  // Last resort: pull the integer out of the response text. The model
+  // almost always names the score even when the JSON wrapper is busted.
+  // Better to land a real number than to leave the row at score=0.
+  const m = text.match(/"score"\s*:\s*(\d+)|score(?:\s*(?:is|of|:))?\s*[:=]?\s*(\d+)/i);
+  if (m) {
+    const n = parseInt(m[1] || m[2] || '0', 10);
+    const reasonM = text.match(/"reason"\s*:\s*"([^"]{1,500})"/);
     return {
-      score: Math.max(0, Math.min(10, Number(parsed.score) || 0)),
-      reason: String(parsed.reason || '').slice(0, 240),
+      score: Math.max(0, Math.min(10, n)),
+      reason: reasonM
+        ? reasonM[1].slice(0, 240)
+        : `(parse-fallback) ${text.replace(/\s+/g, ' ').slice(0, 200)}`,
     };
-  } catch {
-    return { score: 0, reason: 'parse_error' };
   }
+  return { score: 0, reason: 'parse_error' };
+}
+
+// Try several strategies to extract the {score, reason} object from a
+// model response. The model usually returns clean JSON, but sometimes it
+// wraps in prose ("Here is the score: {...}"), uses smart quotes inside
+// the reason field, or truncates at max_tokens. Returns null when none
+// of the strategies find valid data.
+function parseScoreResponse(raw: string): { score: number; reason: string } | null {
+  if (!raw) return null;
+  const stripped = raw.replace(/```(?:json)?/g, '').trim();
+
+  const candidates: string[] = [];
+  // 1. Whole response (already stripped of fences).
+  candidates.push(stripped);
+  // 2. Any {...} block (greedy across newlines). Catches "Here's the score: {...}".
+  const m = stripped.match(/\{[\s\S]*\}/);
+  if (m) candidates.push(m[0]);
+  // 3. Truncated tail at max_tokens — close the brace if missing.
+  const lastBrace = stripped.lastIndexOf('}');
+  if (lastBrace === -1 && stripped.includes('{')) {
+    candidates.push(stripped + '}');
+  }
+
+  for (const c of candidates) {
+    try {
+      const parsed = JSON.parse(c);
+      const score = Number(parsed.score);
+      if (Number.isFinite(score)) {
+        return {
+          score: Math.max(0, Math.min(10, score)),
+          reason: String(parsed.reason || '').slice(0, 240),
+        };
+      }
+    } catch {
+      // try next candidate
+    }
+  }
+  return null;
 }
