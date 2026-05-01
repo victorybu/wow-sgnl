@@ -147,6 +147,8 @@ export async function initSchema() {
   await sql`CREATE INDEX IF NOT EXISTS top_pick_clusters_client_idx ON top_pick_clusters(client_id);`;
   await sql`ALTER TABLE watchlist ADD COLUMN IF NOT EXISTS audience_role TEXT`;
   await sql`CREATE INDEX IF NOT EXISTS watchlist_audience_role_idx ON watchlist(client_id, audience_role) WHERE audience_role IS NOT NULL;`;
+  await sql`ALTER TABLE watchlist ADD COLUMN IF NOT EXISTS party TEXT`;
+  await sql`CREATE INDEX IF NOT EXISTS watchlist_party_idx ON watchlist(client_id, party) WHERE party IS NOT NULL;`;
   await sql`
     CREATE TABLE IF NOT EXISTS briefings (
       id SERIAL PRIMARY KEY,

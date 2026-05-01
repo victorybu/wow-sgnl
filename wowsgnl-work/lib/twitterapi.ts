@@ -179,6 +179,70 @@ export async function fetchAllUserTweets(opts: {
   return out;
 }
 
+/**
+ * Pull every member of a public X list. Walks `/twitter/list/members`
+ * with cursor pagination, deduping by lowercase userName. Caps at
+ * `maxPages * pageSize` total members so a runaway list (10k+ members)
+ * doesn't burn the credits — adjust if a real use case appears.
+ */
+export type ListMember = {
+  id: string | null;
+  userName: string;
+  name: string | null;
+};
+
+export async function fetchListMembers(opts: {
+  listId: string;
+  maxPages?: number;
+}): Promise<{ members: ListMember[]; pages: number; cappedAt: number | null }> {
+  const maxPages = Math.max(1, Math.min(50, opts.maxPages ?? 30));
+  const seen = new Set<string>();
+  const out: ListMember[] = [];
+  let cursor: string | null = null;
+  let pages = 0;
+  let cappedAt: number | null = null;
+
+  for (let page = 0; page < maxPages; page++) {
+    const url: string =
+      `${BASE}/twitter/list/members?list_id=${encodeURIComponent(opts.listId)}` +
+      (cursor ? `&cursor=${encodeURIComponent(cursor)}` : '');
+    const res: Response = await fetch(url, {
+      headers: { 'X-API-Key': process.env.TWITTERAPI_KEY! },
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`twitterapi list page ${page + 1}: ${res.status} ${body.slice(0, 200)}`);
+    }
+    const data: any = await res.json();
+    const rawMembers: any[] = data.members || data.data?.members || [];
+    pages++;
+
+    for (const m of rawMembers) {
+      const handle = String(m.userName || m.screen_name || '').trim().toLowerCase();
+      if (!handle || seen.has(handle)) continue;
+      seen.add(handle);
+      out.push({
+        id: m.id ? String(m.id) : null,
+        userName: handle,
+        name: m.name || null,
+      });
+    }
+
+    const nextCursor: string | null =
+      data.next_cursor || data.cursor || data.data?.next_cursor || null;
+    const hasNext: boolean = !!(data.has_next_page ?? data.has_next ?? nextCursor);
+
+    if (!hasNext || !nextCursor || rawMembers.length === 0) break;
+    if (page === maxPages - 1) {
+      cappedAt = out.length;
+      break;
+    }
+    cursor = nextCursor;
+  }
+
+  return { members: out, pages, cappedAt };
+}
+
 export async function searchTweets(
   query: string,
   opts: { sinceMinutes?: number; lastSeenId?: string | null; cap?: number } = {}

@@ -17,6 +17,7 @@ type EventRow = {
   relevance_score: number | null;
   relevance_reason: string | null;
   audience_role: string | null;
+  party: string | null;
 };
 
 function timeAgo(iso: string | null): string {
@@ -45,12 +46,17 @@ export default async function BriefingPage() {
   const r = await sql`
     SELECT e.id, e.author, e.content, e.url, e.posted_at, e.created_at,
            e.relevance_score, e.relevance_reason,
-           (SELECT w.audience_role FROM watchlist w
-            WHERE w.client_id = e.client_id
-              AND w.kind = 'x_account'
-              AND LOWER(w.value) = LOWER(e.author)
-            LIMIT 1) AS audience_role
+           w.audience_role,
+           w.party
     FROM events e
+    LEFT JOIN LATERAL (
+      SELECT audience_role, party
+      FROM watchlist
+      WHERE client_id = e.client_id
+        AND kind = 'x_account'
+        AND LOWER(value) = LOWER(e.author)
+      LIMIT 1
+    ) w ON TRUE
     WHERE e.client_id = ${cid}
       AND COALESCE(e.posted_at, e.created_at) >= NOW() - INTERVAL '24 hours'
       AND (e.feedback IS DISTINCT FROM 'noise')
@@ -149,6 +155,11 @@ export default async function BriefingPage() {
                       {s.primary.audience_role}
                     </span>
                   )}
+                  {s.primary.party && (
+                    <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${partyClass(s.primary.party)}`}>
+                      {s.primary.party}
+                    </span>
+                  )}
                   <span className="opacity-50">{timeAgo(s.primary.posted_at || s.primary.created_at)}</span>
                 </header>
                 <p className="text-sm whitespace-pre-wrap leading-relaxed">{s.primary.content}</p>
@@ -233,6 +244,13 @@ function Empty({ msg }: { msg: string }) {
   return <p className="text-sm opacity-50 italic">{msg}</p>;
 }
 
+function partyClass(p: string): string {
+  if (p === 'D') return 'border-blue-500/40 bg-blue-500/10 text-blue-200';
+  if (p === 'R') return 'border-red-500/40 bg-red-500/10 text-red-200';
+  if (p === 'I') return 'border-yellow-500/40 bg-yellow-500/10 text-yellow-200';
+  return 'border-neutral-800 bg-neutral-900 text-neutral-300';
+}
+
 function CompactRow({ ev }: { ev: EventRow }) {
   return (
     <li className="border border-neutral-800 rounded-lg p-3">
@@ -248,6 +266,11 @@ function CompactRow({ ev }: { ev: EventRow }) {
         {ev.audience_role && (
           <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-300 border border-neutral-700">
             {ev.audience_role}
+          </span>
+        )}
+        {ev.party && (
+          <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${partyClass(ev.party)}`}>
+            {ev.party}
           </span>
         )}
         <span className="opacity-50">·</span>
