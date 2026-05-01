@@ -89,6 +89,7 @@ export default function Triage() {
 
   const rate = async (rating: 'signal' | 'noise') => {
     if (!current || posting) return;
+    try { (navigator as any)?.vibrate?.(15); } catch {}
     setPosting(current.id);
     setExitDir(rating === 'signal' ? 'right' : 'left');
     try {
@@ -122,6 +123,7 @@ export default function Triage() {
 
   const skip = () => {
     if (!current || posting) return;
+    try { (navigator as any)?.vibrate?.(10); } catch {}
     advance('up', s => ({ ...s, skipped: s.skipped + 1 }));
   };
 
@@ -138,6 +140,42 @@ export default function Triage() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [current, posting]);
+
+  // Haptic feedback (mobile only — silently no-ops on desktop)
+  const buzz = (ms = 10) => {
+    try { (navigator as any)?.vibrate?.(ms); } catch {}
+  };
+
+  // Touch swipe handlers — left=noise, right=signal, down=skip
+  const touchRef = useRef<{ x: number; y: number; active: boolean } | null>(null);
+  const [swipeOffset, setSwipeOffset] = useState({ x: 0, y: 0 });
+  const SWIPE_THRESHOLD = 80; // pixels
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    if (posting) return;
+    const t = e.touches[0];
+    touchRef.current = { x: t.clientX, y: t.clientY, active: true };
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    if (!touchRef.current?.active) return;
+    const t = e.touches[0];
+    const dx = t.clientX - touchRef.current.x;
+    const dy = t.clientY - touchRef.current.y;
+    setSwipeOffset({ x: dx, y: Math.max(0, dy) });
+  };
+  const onTouchEnd = () => {
+    if (!touchRef.current?.active) return;
+    const { x, y } = swipeOffset;
+    touchRef.current.active = false;
+    setSwipeOffset({ x: 0, y: 0 });
+    if (Math.abs(x) > SWIPE_THRESHOLD && Math.abs(x) > Math.abs(y)) {
+      buzz(15);
+      if (x < 0) rate('noise'); else rate('signal');
+    } else if (y > SWIPE_THRESHOLD) {
+      buzz(10);
+      skip();
+    }
+  };
 
   const exitClass =
     exitDir === 'left' ? 'translate-x-[-130%] -rotate-12 opacity-0'
@@ -200,11 +238,42 @@ export default function Triage() {
         <>
           <div className="flex-1 flex items-center justify-center my-4">
             <article
-              className={`relative border border-neutral-800 rounded-2xl p-6 bg-neutral-950 w-full transition-all duration-200 ease-out ${exitClass}`}
+              onTouchStart={onTouchStart}
+              onTouchMove={onTouchMove}
+              onTouchEnd={onTouchEnd}
+              style={
+                exitDir
+                  ? undefined
+                  : {
+                      transform: `translate(${swipeOffset.x}px, ${swipeOffset.y}px) rotate(${swipeOffset.x / 25}deg)`,
+                      touchAction: 'pan-y',
+                    }
+              }
+              className={`relative border border-neutral-800 rounded-2xl p-6 bg-neutral-950 w-full select-none transition-all duration-200 ease-out ${exitClass}`}
             >
               {/* peek of next card behind */}
               {queue[1] && (
                 <div className="absolute inset-0 -z-10 translate-y-2 scale-95 border border-neutral-900 rounded-2xl bg-neutral-950/50 pointer-events-none" />
+              )}
+
+              {/* swipe direction hints (visible while dragging) */}
+              {Math.abs(swipeOffset.x) > 30 && (
+                <div
+                  className={`absolute top-4 ${swipeOffset.x < 0 ? 'right-4' : 'left-4'} pointer-events-none text-3xl font-bold ${
+                    swipeOffset.x < 0 ? 'text-red-400' : 'text-green-400'
+                  }`}
+                  style={{ opacity: Math.min(Math.abs(swipeOffset.x) / SWIPE_THRESHOLD, 1) }}
+                >
+                  {swipeOffset.x < 0 ? '👎 NOISE' : '👍 SIGNAL'}
+                </div>
+              )}
+              {swipeOffset.y > 30 && (
+                <div
+                  className="absolute bottom-4 left-1/2 -translate-x-1/2 pointer-events-none text-2xl font-bold text-neutral-300"
+                  style={{ opacity: Math.min(swipeOffset.y / SWIPE_THRESHOLD, 1) }}
+                >
+                  ⏭ SKIP
+                </div>
               )}
 
               <header className="flex items-center gap-2 flex-wrap mb-4">
