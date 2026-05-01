@@ -1,4 +1,10 @@
 import { sql } from '@/lib/db';
+import {
+  addRejectedDraftExample,
+  addRejectedPostExample,
+  unrejectDraftExample,
+  unrejectPostExample,
+} from '@/lib/voice';
 import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
@@ -50,8 +56,10 @@ export async function POST(req: Request) {
       await sql`UPDATE events SET feedback=NULL, feedback_at=NULL, feedback_reason=NULL, feedback_note=NULL WHERE id = ${targetId}`;
     } else if (kind === 'draft') {
       await sql`UPDATE drafts SET feedback=NULL, feedback_at=NULL, feedback_reason=NULL, feedback_note=NULL WHERE id = ${targetId}`;
+      await unrejectDraftExample(targetId);
     } else if (kind === 'post') {
       await sql`UPDATE posts SET feedback=NULL, feedback_at=NULL, feedback_reason=NULL, feedback_note=NULL WHERE id = ${targetId}`;
+      await unrejectPostExample(targetId);
     }
     await sql`
       INSERT INTO ratings_history (kind, target_id, event_id, rating, reason, note)
@@ -62,8 +70,54 @@ export async function POST(req: Request) {
       await sql`UPDATE events SET feedback=${rating}, feedback_at=NOW(), feedback_reason=${reason}, feedback_note=${note} WHERE id = ${targetId}`;
     } else if (kind === 'draft') {
       await sql`UPDATE drafts SET feedback=${rating}, feedback_at=NOW(), feedback_reason=${reason}, feedback_note=${note} WHERE id = ${targetId}`;
+      if (rating === 'noise') {
+        const ctx = await sql`
+          SELECT d.angle, e.id AS event_id, e.client_id, e.content AS event_content
+          FROM drafts d JOIN events e ON e.id = d.event_id
+          WHERE d.id = ${targetId}
+        `;
+        const c = ctx.rows[0];
+        if (c && c.client_id) {
+          await addRejectedDraftExample({
+            clientId: c.client_id,
+            draftId: targetId,
+            eventId: c.event_id,
+            angle: c.angle,
+            eventContent: c.event_content,
+            reason,
+            note,
+          });
+        }
+      } else {
+        // Flipping draft to 'signal' deactivates any prior anti-voice row.
+        await unrejectDraftExample(targetId);
+      }
     } else if (kind === 'post') {
       await sql`UPDATE posts SET feedback=${rating}, feedback_at=NOW(), feedback_reason=${reason}, feedback_note=${note} WHERE id = ${targetId}`;
+      if (rating === 'noise') {
+        const ctx = await sql`
+          SELECT p.content AS post_content, d.angle, e.id AS event_id, e.client_id, e.content AS event_content
+          FROM posts p
+          JOIN drafts d ON d.id = p.draft_id
+          JOIN events e ON e.id = d.event_id
+          WHERE p.id = ${targetId}
+        `;
+        const c = ctx.rows[0];
+        if (c && c.client_id) {
+          await addRejectedPostExample({
+            clientId: c.client_id,
+            postId: targetId,
+            eventId: c.event_id,
+            content: c.post_content,
+            angle: c.angle,
+            eventContent: c.event_content,
+            reason,
+            note,
+          });
+        }
+      } else {
+        await unrejectPostExample(targetId);
+      }
     }
     await sql`
       INSERT INTO ratings_history (kind, target_id, event_id, rating, reason, note)

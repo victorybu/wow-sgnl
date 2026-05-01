@@ -1,6 +1,6 @@
 import { sql } from '@/lib/db';
 import { generateAngles, generatePosts } from '@/lib/drafts';
-import { getActiveVoiceExamples } from '@/lib/voice';
+import { getActiveVoiceExamples, getActiveAntiVoiceExamples } from '@/lib/voice';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
@@ -23,12 +23,16 @@ async function genAngles(eventId: number) {
       WHERE e.id = ${eventId}
     `;
     const ev = e.rows[0];
-    const voiceExamples = await getActiveVoiceExamples(ev.client_id, 8);
+    const [voiceExamples, antiExamples] = await Promise.all([
+      getActiveVoiceExamples(ev.client_id, 8),
+      getActiveAntiVoiceExamples(ev.client_id, 5),
+    ]);
     const angles = await generateAngles({
       event: ev.content,
       clientName: ev.client_name,
       voiceProfile: ev.voice_profile || '',
       voiceExamples,
+      antiExamples,
     });
     for (const a of angles) {
       await sql`INSERT INTO drafts (event_id, angle, platform) VALUES (${eventId}, ${a}, 'x')`;
@@ -52,13 +56,17 @@ async function genPosts(draftId: number) {
     `;
     const dr = d.rows[0];
     evId = dr.event_id;
-    const voiceExamples = await getActiveVoiceExamples(dr.client_id, 8);
+    const [voiceExamples, antiExamples] = await Promise.all([
+      getActiveVoiceExamples(dr.client_id, 8),
+      getActiveAntiVoiceExamples(dr.client_id, 5),
+    ]);
     const variants = await generatePosts({
       event: dr.event_content,
       angle: dr.angle,
       clientName: dr.client_name,
       voiceProfile: dr.voice_profile || '',
       voiceExamples,
+      antiExamples,
       platform: 'x',
     });
     for (let i = 0; i < variants.length; i++) {

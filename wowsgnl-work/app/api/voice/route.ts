@@ -1,5 +1,5 @@
 import { sql } from '@/lib/db';
-import { composeVoiceBlock, getActiveVoiceExamples } from '@/lib/voice';
+import { composeVoiceBlock, getActiveVoiceExamples, getActiveAntiVoiceExamples } from '@/lib/voice';
 import { getCurrentClient } from '@/lib/clients';
 import { NextResponse } from 'next/server';
 
@@ -52,8 +52,11 @@ export async function GET(req: Request) {
   `;
 
   // Build the live prompt preview (what the next gen call will see)
-  const activeExamples = await getActiveVoiceExamples(clientId, 8);
-  const promptPreview = composeVoiceBlock(client.voice_profile || '', activeExamples);
+  const [activeExamples, antiExamples] = await Promise.all([
+    getActiveVoiceExamples(clientId, 8),
+    getActiveAntiVoiceExamples(clientId, 5),
+  ]);
+  const promptPreview = composeVoiceBlock(client.voice_profile || '', activeExamples, antiExamples);
 
   return NextResponse.json({
     ts: new Date().toISOString(),
@@ -61,6 +64,7 @@ export async function GET(req: Request) {
     examples: examplesRes.rows,
     stats: stats.rows[0],
     active_in_prompt: activeExamples.length,
+    anti_in_prompt: antiExamples.length,
     prompt_preview: promptPreview,
   });
 }

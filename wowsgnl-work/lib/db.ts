@@ -131,6 +131,9 @@ export async function initSchema() {
   await sql`ALTER TABLE voice_examples ADD COLUMN IF NOT EXISTS engagement_fetched_at TIMESTAMPTZ`;
   await sql`ALTER TABLE voice_examples ADD COLUMN IF NOT EXISTS auto_weight_reason TEXT`;
   await sql`CREATE INDEX IF NOT EXISTS voice_examples_shipped_tweet_idx ON voice_examples(shipped_tweet_id) WHERE shipped_tweet_id IS NOT NULL;`;
+  await sql`ALTER TABLE voice_examples ADD COLUMN IF NOT EXISTS source_draft_id INTEGER REFERENCES drafts(id) ON DELETE SET NULL`;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS voice_examples_unique_draft ON voice_examples(source_draft_id) WHERE source_draft_id IS NOT NULL;`;
+  await sql`CREATE INDEX IF NOT EXISTS voice_examples_anti_idx ON voice_examples(client_id, added_at DESC) WHERE weight = -1;`;
   await sql`
     CREATE TABLE IF NOT EXISTS top_pick_clusters (
       id SERIAL PRIMARY KEY,

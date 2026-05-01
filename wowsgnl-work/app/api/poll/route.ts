@@ -2,7 +2,7 @@ import { sql } from '@/lib/db';
 import { fetchUserTweets, searchTweets } from '@/lib/twitterapi';
 import { scoreRelevance } from '@/lib/relevance';
 import { generateAngles } from '@/lib/drafts';
-import { getActiveVoiceExamples } from '@/lib/voice';
+import { getActiveVoiceExamples, getActiveAntiVoiceExamples } from '@/lib/voice';
 import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
@@ -107,12 +107,16 @@ export async function GET() {
   let auto_angled = 0;
   for (const ev of topPicks.rows) {
     try {
-      const voiceExamples = await getActiveVoiceExamples(ev.client_id, 8);
+      const [voiceExamples, antiExamples] = await Promise.all([
+        getActiveVoiceExamples(ev.client_id, 8),
+        getActiveAntiVoiceExamples(ev.client_id, 5),
+      ]);
       const angles = await generateAngles({
         event: ev.content,
         clientName: ev.client_name,
         voiceProfile: ev.voice_profile || '',
         voiceExamples,
+        antiExamples,
       });
       for (const a of angles) {
         await sql`INSERT INTO drafts (event_id, angle, platform) VALUES (${ev.id}, ${a}, 'x')`;
