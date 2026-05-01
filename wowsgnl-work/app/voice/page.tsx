@@ -168,6 +168,23 @@ export default function VoicePage() {
         <Stat label="Excluded" value={data.stats.excluded} sub="weight=0" />
       </div>
 
+      {/* Auto-seed CTA */}
+      <div className="mb-4 border border-blue-500/30 bg-blue-500/5 rounded-lg p-4 flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium mb-1">Seed voice from {data.client.name}'s historical X tweets</div>
+          <div className="text-xs opacity-70">
+            Pulls the last ~1000 tweets via twitterapi.io, ranks by engagement velocity, auto-imports the
+            top 50% as voice examples. Runs in ~5 minutes.
+          </div>
+        </div>
+        <Link
+          href="/voice/seed"
+          className="text-xs px-4 py-2 rounded bg-white text-black font-bold whitespace-nowrap hover:bg-neutral-200"
+        >
+          Run seed →
+        </Link>
+      </div>
+
       {/* Add manual example */}
       <details className="mb-6 border border-neutral-800 rounded-lg p-4">
         <summary className="cursor-pointer text-sm font-medium">+ Add a manual voice example</summary>

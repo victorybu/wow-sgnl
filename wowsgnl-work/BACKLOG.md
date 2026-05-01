@@ -39,7 +39,7 @@ I add items via the GitHub mobile editor or laptop anytime — Claude picks them
 
 - [x] **Item 1 — Multi-client with modes (foundation)** — `shipped` 2026-04-30 (commit b4c46ce)
 - [x] **Item 2 — Recalibrate scoring** — `shipped` 2026-04-30 (commit 0c81597; 7+ rate 13.5% → 3.6%)
-- [ ] Item 3 — Auto-seed voice from historical performance — `queued`
+- [ ] **Item 3 — Auto-seed voice from historical performance** — `in-progress` since 2026-05-01
 - [ ] Item 4 — Automated engagement capture post-ship — `queued`
 - [ ] Item 5 — Mobile PWA — `queued`
 - [ ] Item 6 — Topic clustering on Top Picks — `queued`
