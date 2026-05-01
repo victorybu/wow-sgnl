@@ -3,7 +3,6 @@ import { fetchUserTweets, searchTweets } from '@/lib/twitterapi';
 import { scoreRelevance } from '@/lib/relevance';
 import { generateAngles } from '@/lib/drafts';
 import { getActiveVoiceExamples, getActiveAntiVoiceExamples } from '@/lib/voice';
-import { broadcastPush, pushConfigured } from '@/lib/push';
 import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
@@ -139,43 +138,5 @@ export async function GET() {
     }
   }
 
-  // Push notification trigger: any event that just landed at score≥9
-  // and hasn't been notified yet. notified_at is set BEFORE the
-  // broadcast so a partial broadcast on lambda timeout doesn't double-
-  // fire on the next cron. We accept the small risk that a transient
-  // push failure means an event silently never alerts — net new
-  // 9-events are rare enough that re-checking the dashboard catches it.
-  let pushed = 0;
-  let pushDead = 0;
-  let pushFailed = 0;
-  if (pushConfigured()) {
-    const alertable = await sql`
-      SELECT e.id, e.author, e.content, e.url, c.name AS client_name
-      FROM events e JOIN clients c ON c.id = e.client_id
-      WHERE e.relevance_score >= 9
-        AND e.notified_at IS NULL
-        AND (e.feedback IS DISTINCT FROM 'noise')
-        AND e.created_at >= NOW() - INTERVAL '24 hours'
-      ORDER BY e.relevance_score DESC, e.created_at DESC
-      LIMIT 5
-    `;
-    for (const ev of alertable.rows) {
-      try {
-        await sql`UPDATE events SET notified_at = NOW() WHERE id = ${ev.id}`;
-        const r = await broadcastPush({
-          title: `🚨 ${ev.client_name} · score ${10}/10`,
-          body: `@${ev.author || '?'}: ${(ev.content || '').slice(0, 140)}`,
-          url: `/event/${ev.id}`,
-          tag: `event-${ev.id}`,
-        });
-        pushed += r.sent;
-        pushDead += r.dead;
-        pushFailed += r.failed;
-      } catch (err: any) {
-        errors.push(`push event ${ev.id}: ${err.message}`);
-      }
-    }
-  }
-
-  return NextResponse.json({ ok: true, inserted, scored, auto_angled, pushed, push_dead: pushDead, push_failed: pushFailed, debug, errors });
+  return NextResponse.json({ ok: true, inserted, scored, auto_angled, debug, errors });
 }

@@ -175,5 +175,44 @@ export async function getClustersForTopPicks(
   const clusters = await clusterViaAnthropic(candidates);
   // Save to cache (best-effort; failure here shouldn't block rendering)
   saveClusters(clientId, signature, clusters).catch(() => {});
+  // Apply cluster-aware score boost (best-effort): clusters with 3+
+  // events get every member event's cluster_boost set to 1; everyone
+  // else cleared to 0. The +1 is capped at 10 by the read-side
+  // effective_score expression. Awaited so the boost is in place
+  // before the caller queries for top picks / drop-everything.
+  await applyClusterBoosts(clientId, candidates, clusters).catch(() => {});
   return clusters;
+}
+
+async function applyClusterBoosts(
+  clientId: number,
+  candidates: ClusterCandidate[],
+  clusters: Cluster[],
+): Promise<void> {
+  const boostIds: number[] = [];
+  for (const c of clusters) {
+    const size = 1 + (c.related_event_ids?.length || 0);
+    if (size >= 3) {
+      boostIds.push(c.primary_event_id, ...(c.related_event_ids || []));
+    }
+  }
+  const candidateIds = candidates.map(c => c.id);
+  if (candidateIds.length === 0) return;
+  // Set boost=1 on cluster members; clear boost=0 on every candidate
+  // that wasn't part of a 3+ cluster, so a cluster shrinking back to
+  // 2 events doesn't leave stale +1s. Both UPDATEs scope to the
+  // current candidate set so we don't disturb other rows.
+  if (boostIds.length > 0) {
+    await sql`
+      UPDATE events SET cluster_boost = 1
+      WHERE client_id = ${clientId} AND id = ANY(${boostIds})
+    `;
+  }
+  const clearIds = candidateIds.filter(id => !boostIds.includes(id));
+  if (clearIds.length > 0) {
+    await sql`
+      UPDATE events SET cluster_boost = 0
+      WHERE client_id = ${clientId} AND id = ANY(${clearIds}) AND cluster_boost <> 0
+    `;
+  }
 }

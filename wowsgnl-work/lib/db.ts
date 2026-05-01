@@ -172,18 +172,17 @@ export async function initSchema() {
     SET priority_topics = 'prediction markets, polymarket, kalshi, prediction market regulation, election odds, betting volume, political risk, CFTC, DC chatter on prediction markets'
     WHERE name = 'Polymarket' AND priority_topics NOT LIKE '%kalshi%'
   `;
-  await sql`
-    CREATE TABLE IF NOT EXISTS push_subscriptions (
-      id SERIAL PRIMARY KEY,
-      endpoint TEXT NOT NULL UNIQUE,
-      p256dh TEXT NOT NULL,
-      auth TEXT NOT NULL,
-      label TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      last_pushed_at TIMESTAMPTZ,
-      failed_count INTEGER DEFAULT 0
-    );
-  `;
-  await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS notified_at TIMESTAMPTZ`;
-  await sql`CREATE INDEX IF NOT EXISTS events_notified_at_idx ON events(notified_at) WHERE notified_at IS NOT NULL;`;
+  // Push notifications were considered (Item: 9/10 alerts) but rejected;
+  // dropping the push_subscriptions table and events.notified_at column.
+  // Idempotent: DROP IF EXISTS so re-running on fresh DBs is fine.
+  await sql`DROP TABLE IF EXISTS push_subscriptions`;
+  await sql`ALTER TABLE events DROP COLUMN IF EXISTS notified_at`;
+  // Cluster-aware scoring boost: when 3+ watchers post about the same
+  // news beat in 6h, every event in the cluster gets +1. Capped at 10
+  // by the read-side effective_score expression. cluster_boost lives
+  // separately from relevance_score so we can recompute clusters
+  // without losing the human-rated score and so the boost is
+  // transparent in the UI ("7 +1 cluster = 8").
+  await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS cluster_boost INTEGER DEFAULT 0`;
+  await sql`CREATE INDEX IF NOT EXISTS events_cluster_boost_idx ON events(client_id, cluster_boost) WHERE cluster_boost > 0;`;
 }

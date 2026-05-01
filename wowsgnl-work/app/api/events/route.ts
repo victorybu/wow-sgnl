@@ -195,6 +195,7 @@ export async function GET(req: Request) {
   if (client.mode === 'drafting') {
     const tp = await sql`
       SELECT e.id, e.author, e.content, e.url, e.relevance_score, e.relevance_reason,
+             COALESCE(e.cluster_boost, 0) AS cluster_boost,
              e.posted_at, e.created_at,
              e.feedback, e.feedback_at, e.feedback_reason, e.feedback_note,
              c.name AS client_name,
@@ -267,6 +268,30 @@ export async function GET(req: Request) {
     }
   }
 
+  // Drop-everything alerts: events whose effective score (raw +
+  // cluster_boost, capped at 10) hits ≥9 from the last 24h. The
+  // cluster boost means a swarm of three 8s on the same beat fires the
+  // banner just like a single 9 would. Rendered as a red hero above
+  // the rest of the dashboard regardless of which filter is active.
+  const dropEverything = await sql`
+    SELECT e.id, e.author, e.content, e.url,
+           e.relevance_score,
+           COALESCE(e.cluster_boost, 0) AS cluster_boost,
+           LEAST(COALESCE(e.relevance_score, 0) + COALESCE(e.cluster_boost, 0), 10) AS effective_score,
+           e.relevance_reason,
+           e.posted_at, e.created_at,
+           c.name AS client_name,
+           EXISTS(SELECT 1 FROM drafts d WHERE d.event_id = e.id) AS has_drafts,
+           EXISTS(SELECT 1 FROM drafts d WHERE d.event_id = e.id AND d.shipped = TRUE) AS is_shipped
+    FROM events e JOIN clients c ON c.id = e.client_id
+    WHERE e.client_id = ${cid}
+      AND LEAST(COALESCE(e.relevance_score, 0) + COALESCE(e.cluster_boost, 0), 10) >= 9
+      AND (e.feedback IS DISTINCT FROM 'noise')
+      AND COALESCE(e.posted_at, e.created_at) >= NOW() - INTERVAL '24 hours'
+    ORDER BY effective_score DESC, COALESCE(e.posted_at, e.created_at) DESC
+    LIMIT 5
+  `;
+
   return NextResponse.json({
     ts: new Date().toISOString(),
     filter,
@@ -275,5 +300,6 @@ export async function GET(req: Request) {
     stats: stats.rows[0],
     counts: counts.rows[0],
     top_picks: topPicks,
+    drop_everything: dropEverything.rows,
   });
 }

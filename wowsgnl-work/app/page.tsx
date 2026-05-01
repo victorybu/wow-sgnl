@@ -51,6 +51,7 @@ type TopPick = {
   url: string | null;
   relevance_score: number | null;
   relevance_reason: string | null;
+  cluster_boost: number;
   posted_at: string | null;
   created_at: string;
   feedback: 'signal' | 'noise' | null;
@@ -58,6 +59,22 @@ type TopPick = {
   is_shipped: boolean;
   drafts: DraftSummary[];
   related: RelatedEvent[];
+};
+
+type DropEverything = {
+  id: number;
+  author: string | null;
+  content: string;
+  url: string | null;
+  relevance_score: number | null;
+  cluster_boost: number;
+  effective_score: number;
+  relevance_reason: string | null;
+  posted_at: string | null;
+  created_at: string;
+  client_name: string;
+  has_drafts: boolean;
+  is_shipped: boolean;
 };
 
 type Payload = {
@@ -86,6 +103,7 @@ type Payload = {
     muted: number;
   };
   top_picks: TopPick[];
+  drop_everything: DropEverything[];
 };
 
 const SIGNAL_REASONS = [
@@ -124,6 +142,7 @@ function timeAgo(iso: string | null): string {
 
 function scoreClass(score: number | null): string {
   if (score === null) return 'bg-neutral-800/60 text-neutral-400 border border-neutral-700';
+  if (score >= 9) return 'bg-red-500/25 text-red-200 border border-red-500/60 font-bold';
   if (score >= 7) return 'bg-green-500/20 text-green-300 border border-green-500/40';
   if (score >= 5) return 'bg-yellow-500/15 text-yellow-300 border border-yellow-500/40';
   return 'bg-neutral-800 text-neutral-500 border border-neutral-700';
@@ -229,10 +248,14 @@ export default function Home() {
           )}
           <Link href="/watchlist" className="underline">Watchlist</Link>
           <Link href="/clients" className="underline">Clients</Link>
-          <PushToggle />
           <Link href="/run" className="underline opacity-60">debug</Link>
         </div>
       </div>
+
+      <DropEverythingBanner
+        clientId={data?.current_client?.id ?? null}
+        events={data?.drop_everything ?? []}
+      />
 
       <StandingBrief clientId={data?.current_client?.id ?? null} />
 
@@ -553,10 +576,15 @@ function EventCard({
 
 function TopPickCard({ pick: p }: { pick: TopPick }) {
   const [showRelated, setShowRelated] = useState(false);
+  const boost = p.cluster_boost || 0;
+  const effectiveScore =
+    p.relevance_score !== null ? Math.min((p.relevance_score || 0) + boost, 10) : null;
   const scoreCls =
-    p.relevance_score !== null && p.relevance_score >= 7
-      ? "bg-green-500/20 text-green-300 border border-green-500/40"
-      : "bg-yellow-500/15 text-yellow-300 border border-yellow-500/40";
+    effectiveScore !== null && effectiveScore >= 9
+      ? "bg-red-500/25 text-red-200 border border-red-500/60 font-bold"
+      : effectiveScore !== null && effectiveScore >= 7
+        ? "bg-green-500/20 text-green-300 border border-green-500/40"
+        : "bg-yellow-500/15 text-yellow-300 border border-yellow-500/40";
   const isCluster = p.related.length > 0;
   const relatedAuthors = p.related.slice(0, 3).map(r => `@${r.author || '?'}`).join(', ');
   const moreCount = p.related.length > 3 ? p.related.length - 3 : 0;
@@ -569,8 +597,16 @@ function TopPickCard({ pick: p }: { pick: TopPick }) {
       )}
       <header className="flex items-center gap-2 flex-wrap mb-2">
         <span className={`text-sm font-bold px-2 py-0.5 rounded ${scoreCls}`}>
-          {p.relevance_score ?? "?"}/10
+          {effectiveScore ?? "?"}/10
         </span>
+        {boost > 0 && (
+          <span
+            className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-purple-500/40 bg-purple-500/10 text-purple-200"
+            title={`Cluster boost: raw score ${p.relevance_score} + ${boost} (3+ watchers on same beat)`}
+          >
+            +{boost} cluster
+          </span>
+        )}
         {p.author && (
           <a
             href={`https://x.com/${p.author}`}
@@ -853,6 +889,127 @@ function StandingBrief({ clientId }: { clientId: number | null }) {
   );
 }
 
+// "DROP EVERYTHING" banner. Renders red hero blocks at the very top
+// of the dashboard for any score-9+ event from the last 24h that the
+// user hasn't dismissed yet. Dismissal is per-device (localStorage)
+// and per-event-id, so once you've seen it you don't see it again.
+// localStorage key includes client_id so switching clients doesn't
+// cross-contaminate which alerts are dismissed.
+function DropEverythingBanner({
+  clientId,
+  events,
+}: {
+  clientId: number | null;
+  events: DropEverything[];
+}) {
+  const [dismissed, setDismissed] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    if (!clientId) return;
+    const key = `signal_seen_9plus_${clientId}`;
+    try {
+      const raw = window.localStorage.getItem(key);
+      if (raw) setDismissed(new Set(JSON.parse(raw)));
+    } catch {}
+  }, [clientId]);
+
+  function dismiss(id: number) {
+    if (!clientId) return;
+    const key = `signal_seen_9plus_${clientId}`;
+    const next = new Set(dismissed);
+    next.add(id);
+    setDismissed(next);
+    try {
+      window.localStorage.setItem(key, JSON.stringify(Array.from(next)));
+    } catch {}
+  }
+
+  const visible = events.filter(e => !dismissed.has(e.id));
+  if (visible.length === 0) return null;
+
+  return (
+    <section className="mb-6 space-y-2">
+      {visible.map(e => (
+        <article
+          key={e.id}
+          className="border-2 border-red-500/60 bg-red-500/10 rounded-lg p-4 shadow-lg shadow-red-500/10"
+        >
+          <header className="flex items-center gap-2 flex-wrap mb-2">
+            <span className="text-xs font-bold uppercase tracking-wider text-red-200">
+              🚨 Drop everything
+            </span>
+            <span className="text-sm font-bold px-2 py-0.5 rounded bg-red-500/30 text-red-100 border border-red-500/60">
+              {e.effective_score}/10
+            </span>
+            {e.cluster_boost > 0 && (
+              <span
+                className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-red-500/40 bg-red-500/15 text-red-200"
+                title={`Cluster boost: raw ${e.relevance_score} + ${e.cluster_boost} (3+ watchers on same beat)`}
+              >
+                +{e.cluster_boost} cluster
+              </span>
+            )}
+            {e.author && (
+              <a
+                href={`https://x.com/${e.author}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm hover:underline"
+              >
+                @{e.author}
+              </a>
+            )}
+            <span className="text-xs opacity-50">·</span>
+            <span className="text-xs opacity-60">{e.client_name}</span>
+            <span className="text-xs opacity-50">·</span>
+            <span className="text-xs opacity-60">{timeAgo(e.posted_at || e.created_at)}</span>
+            {e.is_shipped && (
+              <span className="text-xs px-1.5 py-0.5 rounded bg-green-500/20 text-green-200 border border-green-500/40">
+                shipped
+              </span>
+            )}
+            {e.has_drafts && !e.is_shipped && (
+              <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-200 border border-blue-500/40">
+                drafted
+              </span>
+            )}
+            <span className="flex-1" />
+            <button
+              onClick={() => dismiss(e.id)}
+              className="text-xs underline opacity-60 hover:opacity-100"
+              title="Dismiss this alert from the banner (event stays in feed)"
+            >
+              got it ✓
+            </button>
+          </header>
+          <p className="text-sm whitespace-pre-wrap leading-relaxed mb-2">{e.content}</p>
+          {e.relevance_reason && (
+            <p className="text-xs italic text-red-200/70 mb-3">{e.relevance_reason}</p>
+          )}
+          <div className="flex gap-2 flex-wrap">
+            <Link
+              href={`/event/${e.id}`}
+              className="text-xs px-3 py-1.5 rounded bg-white text-black font-bold hover:bg-neutral-200"
+            >
+              {e.has_drafts ? 'Open & ship →' : 'Generate angles →'}
+            </Link>
+            {e.url && (
+              <a
+                href={e.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs px-3 py-1.5 rounded border border-red-500/40 hover:border-red-500/60"
+              >
+                Open on X ↗
+              </a>
+            )}
+          </div>
+        </article>
+      ))}
+    </section>
+  );
+}
+
 function Tile({ label, value, accent }: { label: string; value: number; accent?: 'green' | 'gold' | null }) {
   const accentCls =
     accent === 'green' ? 'border-green-500/40 bg-green-500/5' :
@@ -866,103 +1023,3 @@ function Tile({ label, value, accent }: { label: string; value: number; accent?:
   );
 }
 
-// Push notification toggle for 9/10 alerts. Subscribes the current
-// device's service worker to web-push using the public VAPID key from
-// env, POSTs the subscription to /api/push/subscribe, and persists
-// the on/off state to localStorage so the button reflects reality on
-// reload. Hidden if browser doesn't support Notifications/PushManager.
-function urlBase64ToUint8Array(base64String: string): Uint8Array {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const raw = typeof window !== 'undefined' ? window.atob(base64) : '';
-  const out = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
-  return out;
-}
-
-function PushToggle() {
-  const [supported, setSupported] = useState<boolean>(false);
-  const [permission, setPermission] = useState<NotificationPermission | 'unknown'>('unknown');
-  const [subscribed, setSubscribed] = useState<boolean>(false);
-  const [busy, setBusy] = useState<boolean>(false);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
-      setSupported(false);
-      return;
-    }
-    setSupported(true);
-    setPermission(Notification.permission);
-    void navigator.serviceWorker.ready.then(async (reg) => {
-      const sub = await reg.pushManager.getSubscription();
-      setSubscribed(!!sub);
-    });
-  }, []);
-
-  async function subscribe() {
-    setBusy(true);
-    try {
-      const perm = await Notification.requestPermission();
-      setPermission(perm);
-      if (perm !== 'granted') return;
-      const reg = await navigator.serviceWorker.ready;
-      const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || '';
-      if (!publicKey) {
-        alert('VAPID public key missing — server env var not set');
-        return;
-      }
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(publicKey) as BufferSource,
-      });
-      const json = sub.toJSON();
-      await fetch('/api/push/subscribe', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          endpoint: json.endpoint,
-          keys: json.keys,
-          label: navigator.userAgent.slice(0, 80),
-        }),
-      });
-      setSubscribed(true);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function unsubscribe() {
-    setBusy(true);
-    try {
-      const reg = await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.getSubscription();
-      if (sub) {
-        await fetch('/api/push/unsubscribe', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ endpoint: sub.endpoint }),
-        });
-        await sub.unsubscribe();
-      }
-      setSubscribed(false);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  if (!supported) return null;
-  if (permission === 'denied') {
-    return <span className="opacity-50" title="Notifications blocked in browser settings">🔕 blocked</span>;
-  }
-  return (
-    <button
-      onClick={subscribed ? unsubscribe : subscribe}
-      disabled={busy}
-      className={`underline ${subscribed ? 'text-green-300' : 'opacity-70 hover:opacity-100'}`}
-      title={subscribed ? 'Push notifications ON for 9+ events. Click to turn off.' : 'Get notified instantly when an event scores 9+'}
-    >
-      {subscribed ? '🔔 alerts on' : '🔕 alerts off'}
-    </button>
-  );
-}
