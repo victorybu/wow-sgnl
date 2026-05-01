@@ -148,6 +148,17 @@ function scoreClass(score: number | null): string {
   return 'bg-neutral-800 text-neutral-500 border border-neutral-700';
 }
 
+// Tooltip text for a score badge — what the band means in operator
+// terms. Shown via the title attribute on score pills.
+function scoreTitle(score: number | null): string {
+  if (score === null) return 'Pending — has not yet been scored by the LLM.';
+  if (score >= 9) return 'Drop everything · once-a-month event for this principal. Direct attack, breaking news on a signature issue, or named opponent caught dead-to-rights.';
+  if (score >= 7) return 'Worth drafting today · 2-5x/week max. Live conversation the principal can credibly insert into.';
+  if (score >= 5) return 'On-topic but not urgent · reference material, useful background.';
+  if (score >= 3) return 'Tangentially relevant · connects to principal\'s world but no clear angle.';
+  return 'Skip · not for this principal.';
+}
+
 const FILTERS: { id: Filter; label: string }[] = [
   { id: 'all', label: 'All events' },
   { id: 'top', label: '7+ only' },
@@ -160,14 +171,16 @@ const FILTERS: { id: Filter; label: string }[] = [
 
 export default function Home() {
   const [filter, setFilter] = useState<Filter>('all');
+  const [query, setQuery] = useState<string>('');
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
 
-  const load = async (f: Filter) => {
+  const load = async (f: Filter, q?: string) => {
     try {
-      const res = await fetch(`/api/events?filter=${f}&_=${Date.now()}`, { cache: 'no-store' });
+      const qParam = q && q.trim().length > 0 ? `&q=${encodeURIComponent(q.trim())}` : '';
+      const res = await fetch(`/api/events?filter=${f}${qParam}&_=${Date.now()}`, { cache: 'no-store' });
       if (!res.ok) throw new Error(`${res.status}`);
       const json: Payload = await res.json();
       setData(json);
@@ -180,10 +193,18 @@ export default function Home() {
     }
   };
 
+  // Debounce search input — fire one fetch per ~250ms of typing.
+  useEffect(() => {
+    if (loading && !data) return; // initial load handled by filter effect below
+    const id = setTimeout(() => load(filter, query), 250);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
+
   useEffect(() => {
     setLoading(true);
-    load(filter);
-    const id = setInterval(() => load(filter), 60_000);
+    load(filter, query);
+    const id = setInterval(() => load(filter, query), 60_000);
     return () => clearInterval(id);
   }, [filter]);
 
@@ -228,9 +249,16 @@ export default function Home() {
           <h1 className="text-2xl font-bold">Signal</h1>
           {lastFetch && (
             <span className="text-xs opacity-50">
-              updated {timeAgo(lastFetch.toISOString())} · auto-refresh 60s
+              updated {timeAgo(lastFetch.toISOString())}
             </span>
           )}
+          <button
+            onClick={() => { setLoading(true); void load(filter, query); }}
+            className="text-xs opacity-60 hover:opacity-100 underline"
+            title="Refresh now (otherwise auto-refresh fires every 60s)"
+          >
+            refresh
+          </button>
         </div>
         <div className="flex items-center gap-3 text-xs">
           <Link href="/triage" className="px-3 py-1.5 rounded bg-white text-black font-medium hover:bg-neutral-200">
@@ -287,6 +315,24 @@ export default function Home() {
           value={data?.stats.rated_today ?? '—'}
           sub={data ? `${data.stats.rated_today_signal} 👍 / ${data.stats.rated_today_noise} 👎` : ''}
         />
+      </div>
+
+      <div className="mb-3 relative">
+        <input
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="Search events by author or content…"
+          className="w-full bg-neutral-900 border border-neutral-800 rounded px-3 py-2 text-sm focus:outline-none focus:border-neutral-600"
+        />
+        {query && (
+          <button
+            onClick={() => setQuery('')}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-xs opacity-50 hover:opacity-100"
+            title="Clear search"
+          >
+            ✕
+          </button>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-2 mb-6">
@@ -429,7 +475,10 @@ function EventCard({
     <article className={`border rounded-lg p-4 transition ${cardClass}`}>
       <header className="flex justify-between items-start gap-3 mb-2">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className={`text-xs font-bold px-2 py-0.5 rounded ${scoreClass(e.relevance_score)}`}>
+          <span
+            className={`text-xs font-bold px-2 py-0.5 rounded ${scoreClass(e.relevance_score)}`}
+            title={scoreTitle(e.relevance_score)}
+          >
             {e.relevance_score === null ? 'pending' : `${e.relevance_score}/10`}
           </span>
           {e.author && (
@@ -596,7 +645,10 @@ function TopPickCard({ pick: p }: { pick: TopPick }) {
         </div>
       )}
       <header className="flex items-center gap-2 flex-wrap mb-2">
-        <span className={`text-sm font-bold px-2 py-0.5 rounded ${scoreCls}`}>
+        <span
+          className={`text-sm font-bold px-2 py-0.5 rounded ${scoreCls}`}
+          title={scoreTitle(effectiveScore)}
+        >
           {effectiveScore ?? "?"}/10
         </span>
         {boost > 0 && (

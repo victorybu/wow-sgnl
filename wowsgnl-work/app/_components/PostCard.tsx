@@ -23,6 +23,25 @@ export default function PostCard({ post }: { post: Post }) {
   const [error, setError] = useState<string | null>(null);
   const [shippingOpen, setShippingOpen] = useState(false);
   const [tweetUrl, setTweetUrl] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  const copyContent = async () => {
+    try {
+      await navigator.clipboard.writeText(post.content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Older browsers / file:// — fall back to a hidden textarea select+exec
+      const ta = document.createElement('textarea');
+      ta.value = post.content;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); } catch {}
+      document.body.removeChild(ta);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }
+  };
 
   const saveEdit = async () => {
     setSaving(true);
@@ -159,10 +178,14 @@ export default function PostCard({ post }: { post: Post }) {
           {post.shipped ? '✓ shipped — click to unship' : 'Mark shipped'}
         </button>
         <button
-          onClick={() => navigator.clipboard.writeText(post.content)}
-          className="text-xs px-2 py-1 rounded border border-neutral-700 hover:border-neutral-500"
+          onClick={copyContent}
+          className={`text-xs px-2 py-1 rounded border transition ${
+            copied
+              ? 'border-green-500/60 text-green-200 bg-green-500/10'
+              : 'border-neutral-700 hover:border-neutral-500'
+          }`}
         >
-          Copy
+          {copied ? '✓ copied' : 'Copy'}
         </button>
       </div>
 

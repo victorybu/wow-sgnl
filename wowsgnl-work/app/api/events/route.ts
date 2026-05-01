@@ -12,6 +12,11 @@ type Filter = 'all' | 'unscored' | 'top' | 'drafted' | 'shipped' | 'my_ratings' 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const filter = (searchParams.get('filter') || 'all') as Filter;
+  // Optional free-text search — matches author OR content (ILIKE %q%).
+  // We append a sql fragment to each filter's WHERE clause when set.
+  // Length cap prevents abuse + keeps the LIKE pattern small.
+  const qRaw = (searchParams.get('q') || '').trim().slice(0, 80);
+  const q = qRaw ? `%${qRaw}%` : null;
 
   const client = await getCurrentClient();
   if (!client) {
@@ -141,6 +146,18 @@ export async function GET(req: Request) {
       LIMIT 200
     `;
     events = r.rows;
+  }
+
+  // Apply free-text search post-DB. Cheap because LIMIT 200 caps the
+  // working set; a query that needs to look past 200 rows is rare in
+  // an internal tool with daily-fresh data, and we'd rather not touch
+  // 7 separate SQL branches just to fold ILIKE into each.
+  if (qRaw) {
+    const needle = qRaw.toLowerCase();
+    events = events.filter((e: any) =>
+      (e.author && String(e.author).toLowerCase().includes(needle)) ||
+      (e.content && String(e.content).toLowerCase().includes(needle)),
+    );
   }
 
   const stats = await sql`
