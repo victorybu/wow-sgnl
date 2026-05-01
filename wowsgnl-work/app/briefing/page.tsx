@@ -149,7 +149,29 @@ export default async function BriefingPage() {
     });
     agg.quotes = agg.quotes.slice(0, 5);
   }
-  const topicAggs = Array.from(topicMap.values()).sort((a, b) => b.total - a.total);
+  // Priority-match highlighting. Compute the rough set of keywords
+  // this client cares about by tokenizing client.priority_topics —
+  // strip punctuation, lowercase, dedupe, drop stopwords. A topic_tag
+  // is "priority" if any of its words overlap with this set. Used to
+  // pin priority cards at the top of the section and badge them so
+  // the user can spot prediction-market chatter inside a sea of
+  // general DC-staffer chatter.
+  const priorityKeywords: Set<string> = (() => {
+    const raw = (client.priority_topics || '').toLowerCase();
+    const tokens = raw.split(/[^a-z0-9]+/).filter(Boolean);
+    const stop = new Set(['the', 'and', 'or', 'on', 'of', 'for', 'in', 'to', 'a', 'an', 'with', 'about', 'chatter']);
+    return new Set(tokens.filter(t => t.length >= 3 && !stop.has(t)));
+  })();
+  function isPriorityTag(tag: string): boolean {
+    const tokens = tag.split('_');
+    return tokens.some(t => priorityKeywords.has(t));
+  }
+  const topicAggs = Array.from(topicMap.values()).sort((a, b) => {
+    const pa = isPriorityTag(a.tag) ? 1 : 0;
+    const pb = isPriorityTag(b.tag) ? 1 : 0;
+    if (pa !== pb) return pb - pa; // priority first
+    return b.total - a.total;       // then by volume
+  });
 
   // 7-day tagged-event timeline (newest day on the right). Each bucket
   // is a calendar day in UTC; we render an ASCII sparkline so the
@@ -215,12 +237,22 @@ export default async function BriefingPage() {
           <Empty msg="No tagged mentions yet. Sentiment + topic_tags are written when polling scores intelligence-mode events; once tweets land in the next cron cycles, this section populates." />
         ) : (
           <div className="space-y-4">
-            {topicAggs.map(agg => (
-              <article key={agg.tag} className="border border-purple-500/30 bg-purple-500/5 rounded-lg p-4">
+            {topicAggs.map(agg => {
+              const priority = isPriorityTag(agg.tag);
+              const cardCls = priority
+                ? 'border-2 border-yellow-500/60 bg-yellow-500/5'
+                : 'border border-purple-500/30 bg-purple-500/5';
+              return (
+              <article key={agg.tag} className={`${cardCls} rounded-lg p-4`}>
                 <div className="flex items-baseline gap-2 mb-3 flex-wrap">
-                  <h3 className="text-sm font-bold uppercase tracking-wider text-purple-300">
+                  <h3 className={`text-sm font-bold uppercase tracking-wider ${priority ? 'text-yellow-200' : 'text-purple-300'}`}>
                     {agg.tag.replace(/_/g, ' ')}
                   </h3>
+                  {priority && (
+                    <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-yellow-500/20 text-yellow-200 border border-yellow-500/50 font-bold">
+                      ★ priority match
+                    </span>
+                  )}
                   <span className="text-xs opacity-50">{agg.total} mention{agg.total === 1 ? '' : 's'}</span>
                 </div>
 
@@ -259,7 +291,8 @@ export default async function BriefingPage() {
                   ))}
                 </ul>
               </article>
-            ))}
+              );
+            })}
           </div>
         )}
       </Section>
