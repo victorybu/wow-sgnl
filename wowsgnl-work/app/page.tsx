@@ -233,6 +233,8 @@ export default function Home() {
         </div>
       </div>
 
+      <StandingBrief clientId={data?.current_client?.id ?? null} />
+
       {data && data.top_picks && data.top_picks.length > 0 && (
         <section className="mb-6">
           <div className="flex items-baseline justify-between mb-2">
@@ -708,5 +710,157 @@ function TopPickCard({ pick: p }: { pick: TopPick }) {
         </div>
       )}
     </article>
+  );
+}
+
+// "While you were away" hero. Reads localStorage(signal_last_seen_at_<clientId>)
+// to scope the window. Hidden if first-ever visit or <2h since last
+// visit. The "Mark caught up" button resets the timestamp.
+type StandingBriefData = {
+  ok: boolean;
+  since?: string;
+  window_hours?: number;
+  totals?: { events: number; scored_7plus: number; scored_9plus: number; noise_rated: number };
+  top_events?: any[];
+  clusters?: { cluster_topic: string; primary_event_id: number; author_count: number }[];
+};
+
+const MIN_AWAY_HOURS = 2;
+
+function StandingBrief({ clientId }: { clientId: number | null }) {
+  const [brief, setBrief] = useState<StandingBriefData | null>(null);
+  const [hidden, setHidden] = useState<boolean>(true);
+
+  useEffect(() => {
+    if (!clientId) return;
+    const key = `signal_last_seen_at_${clientId}`;
+    const prev = typeof window !== 'undefined' ? window.localStorage.getItem(key) : null;
+    if (!prev) {
+      window.localStorage.setItem(key, new Date().toISOString());
+      setHidden(true);
+      return;
+    }
+    const ms = Date.parse(prev);
+    if (!Number.isFinite(ms)) {
+      window.localStorage.setItem(key, new Date().toISOString());
+      setHidden(true);
+      return;
+    }
+    const hoursAway = (Date.now() - ms) / 3_600_000;
+    if (hoursAway < MIN_AWAY_HOURS) {
+      setHidden(true);
+      return;
+    }
+    setHidden(false);
+    void fetchBrief(prev);
+  }, [clientId]);
+
+  async function fetchBrief(sinceIso: string) {
+    try {
+      const res = await fetch(`/api/standing-brief?since=${encodeURIComponent(sinceIso)}&_=${Date.now()}`, { cache: 'no-store' });
+      if (!res.ok) return;
+      const j = await res.json();
+      if (j.ok) setBrief(j);
+    } catch {}
+  }
+
+  function markCaughtUp() {
+    if (!clientId) return;
+    const key = `signal_last_seen_at_${clientId}`;
+    window.localStorage.setItem(key, new Date().toISOString());
+    setHidden(true);
+    setBrief(null);
+  }
+
+  if (hidden || !brief || !brief.totals) return null;
+  const t = brief.totals;
+  if (t.events === 0) return null;
+
+  const hoursAway = brief.window_hours ?? 0;
+  const awayLabel =
+    hoursAway < 24 ? `${hoursAway.toFixed(1)}h` : `${(hoursAway / 24).toFixed(1)}d`;
+
+  return (
+    <section className="mb-6 border border-blue-500/40 bg-blue-500/5 rounded-lg p-4">
+      <div className="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
+        <h2 className="text-sm font-bold uppercase tracking-wider text-blue-300">
+          While you were away · {awayLabel}
+        </h2>
+        <button
+          onClick={markCaughtUp}
+          className="text-xs px-3 py-1 rounded border border-blue-500/40 hover:bg-blue-500/15"
+        >
+          Mark all caught up ✓
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4 text-sm">
+        <Tile label="New events" value={t.events} />
+        <Tile label="Scored 7+" value={t.scored_7plus} accent={t.scored_7plus > 0 ? 'green' : null} />
+        <Tile label="Scored 9+" value={t.scored_9plus} accent={t.scored_9plus > 0 ? 'gold' : null} />
+        <Tile label="Marked noise" value={t.noise_rated} />
+      </div>
+
+      {brief.clusters && brief.clusters.length > 0 && (
+        <div className="mb-3 text-xs">
+          <div className="opacity-60 uppercase tracking-wider mb-1">Topic clusters</div>
+          <ul className="space-y-1">
+            {brief.clusters.map(c => (
+              <li key={c.primary_event_id}>
+                <span className="text-blue-200">{c.cluster_topic}</span>
+                <span className="opacity-60"> · {c.author_count} authors</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {brief.top_events && brief.top_events.length > 0 && (
+        <ul className="space-y-2">
+          {brief.top_events.slice(0, 5).map((e: any) => (
+            <li key={e.id} className="flex items-start gap-2 text-sm">
+              <span
+                className={`shrink-0 text-xs font-bold px-2 py-0.5 rounded border ${
+                  (e.relevance_score ?? 0) >= 9
+                    ? 'bg-yellow-500/20 text-yellow-300 border-yellow-500/40'
+                    : (e.relevance_score ?? 0) >= 7
+                      ? 'bg-green-500/20 text-green-300 border-green-500/40'
+                      : 'bg-neutral-800 text-neutral-400 border-neutral-700'
+                }`}
+              >
+                {e.relevance_score ?? '?'}/10
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs opacity-70 truncate">
+                  {e.author && <a href={`https://x.com/${e.author}`} target="_blank" rel="noopener noreferrer" className="hover:underline">@{e.author}</a>}
+                  <span className="opacity-50"> · {timeAgo(e.posted_at || e.created_at)}</span>
+                  {e.draft_count > 0 && <span className="opacity-50"> · {e.draft_count} angle{e.draft_count === 1 ? '' : 's'}</span>}
+                </div>
+                <Link
+                  href={`/event/${e.id}`}
+                  className="block text-sm hover:underline truncate"
+                  title={e.content}
+                >
+                  {e.content.slice(0, 120)}
+                </Link>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function Tile({ label, value, accent }: { label: string; value: number; accent?: 'green' | 'gold' | null }) {
+  const accentCls =
+    accent === 'green' ? 'border-green-500/40 bg-green-500/5' :
+    accent === 'gold' ? 'border-yellow-500/40 bg-yellow-500/5' :
+    'border-neutral-800';
+  return (
+    <div className={`border rounded p-2 ${accentCls}`}>
+      <div className="text-xs opacity-60">{label}</div>
+      <div className="text-xl font-bold tabular-nums">{value}</div>
+    </div>
   );
 }
