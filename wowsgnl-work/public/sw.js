@@ -10,7 +10,7 @@
 // No prefetch, no background sync — keep it lean. Bump CACHE_VERSION
 // to force update on deploy.
 
-const CACHE_VERSION = 'signal-v1';
+const CACHE_VERSION = 'signal-v2';
 const SHELL_URLS = ['/triage', '/'];
 
 self.addEventListener('install', (event) => {
@@ -66,5 +66,41 @@ self.addEventListener('fetch', (event) => {
           return new Response('offline', { status: 503, statusText: 'offline' });
         })
       )
+  );
+});
+
+// Push event: server fires this when a 9+ event lands. Payload comes
+// in as JSON ({title, body, url?, tag?}); show a system notification
+// and stash the URL on the notification's data so click navigates.
+self.addEventListener('push', (event) => {
+  if (!event.data) return;
+  let payload = {};
+  try { payload = event.data.json(); } catch { payload = { title: 'Signal', body: event.data.text() }; }
+  const title = payload.title || 'Signal alert';
+  const opts = {
+    body: payload.body || '',
+    icon: '/icon-192',
+    badge: '/icon-192',
+    data: { url: payload.url || '/' },
+    tag: payload.tag || 'signal',
+    renotify: true,
+    requireInteraction: false,
+  };
+  event.waitUntil(self.registration.showNotification(title, opts));
+});
+
+// Notification click: focus an existing tab on the URL (or open new).
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || '/';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((wins) => {
+      const sameOrigin = wins.find((w) => new URL(w.url).origin === self.location.origin);
+      if (sameOrigin) {
+        sameOrigin.focus();
+        return sameOrigin.navigate(target).catch(() => {});
+      }
+      return self.clients.openWindow(target);
+    }),
   );
 });

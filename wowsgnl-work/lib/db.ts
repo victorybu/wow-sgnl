@@ -172,4 +172,18 @@ export async function initSchema() {
     SET priority_topics = 'prediction markets, polymarket, kalshi, prediction market regulation, election odds, betting volume, political risk, CFTC, DC chatter on prediction markets'
     WHERE name = 'Polymarket' AND priority_topics NOT LIKE '%kalshi%'
   `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id SERIAL PRIMARY KEY,
+      endpoint TEXT NOT NULL UNIQUE,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      label TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      last_pushed_at TIMESTAMPTZ,
+      failed_count INTEGER DEFAULT 0
+    );
+  `;
+  await sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS notified_at TIMESTAMPTZ`;
+  await sql`CREATE INDEX IF NOT EXISTS events_notified_at_idx ON events(notified_at) WHERE notified_at IS NOT NULL;`;
 }

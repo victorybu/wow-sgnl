@@ -229,6 +229,7 @@ export default function Home() {
           )}
           <Link href="/watchlist" className="underline">Watchlist</Link>
           <Link href="/clients" className="underline">Clients</Link>
+          <PushToggle />
           <Link href="/run" className="underline opacity-60">debug</Link>
         </div>
       </div>
@@ -862,5 +863,106 @@ function Tile({ label, value, accent }: { label: string; value: number; accent?:
       <div className="text-xs opacity-60">{label}</div>
       <div className="text-xl font-bold tabular-nums">{value}</div>
     </div>
+  );
+}
+
+// Push notification toggle for 9/10 alerts. Subscribes the current
+// device's service worker to web-push using the public VAPID key from
+// env, POSTs the subscription to /api/push/subscribe, and persists
+// the on/off state to localStorage so the button reflects reality on
+// reload. Hidden if browser doesn't support Notifications/PushManager.
+function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = typeof window !== 'undefined' ? window.atob(base64) : '';
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+function PushToggle() {
+  const [supported, setSupported] = useState<boolean>(false);
+  const [permission, setPermission] = useState<NotificationPermission | 'unknown'>('unknown');
+  const [subscribed, setSubscribed] = useState<boolean>(false);
+  const [busy, setBusy] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+      setSupported(false);
+      return;
+    }
+    setSupported(true);
+    setPermission(Notification.permission);
+    void navigator.serviceWorker.ready.then(async (reg) => {
+      const sub = await reg.pushManager.getSubscription();
+      setSubscribed(!!sub);
+    });
+  }, []);
+
+  async function subscribe() {
+    setBusy(true);
+    try {
+      const perm = await Notification.requestPermission();
+      setPermission(perm);
+      if (perm !== 'granted') return;
+      const reg = await navigator.serviceWorker.ready;
+      const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || '';
+      if (!publicKey) {
+        alert('VAPID public key missing — server env var not set');
+        return;
+      }
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey) as BufferSource,
+      });
+      const json = sub.toJSON();
+      await fetch('/api/push/subscribe', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          endpoint: json.endpoint,
+          keys: json.keys,
+          label: navigator.userAgent.slice(0, 80),
+        }),
+      });
+      setSubscribed(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function unsubscribe() {
+    setBusy(true);
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) {
+        await fetch('/api/push/unsubscribe', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ endpoint: sub.endpoint }),
+        });
+        await sub.unsubscribe();
+      }
+      setSubscribed(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!supported) return null;
+  if (permission === 'denied') {
+    return <span className="opacity-50" title="Notifications blocked in browser settings">🔕 blocked</span>;
+  }
+  return (
+    <button
+      onClick={subscribed ? unsubscribe : subscribe}
+      disabled={busy}
+      className={`underline ${subscribed ? 'text-green-300' : 'opacity-70 hover:opacity-100'}`}
+      title={subscribed ? 'Push notifications ON for 9+ events. Click to turn off.' : 'Get notified instantly when an event scores 9+'}
+    >
+      {subscribed ? '🔔 alerts on' : '🔕 alerts off'}
+    </button>
   );
 }
