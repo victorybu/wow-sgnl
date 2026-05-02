@@ -62,7 +62,13 @@ For each input signal, output JSON with these fields:
   * "kalshi_cutter_hire" — for any signal about Stephanie Cutter joining Kalshi
   * "polymarket_april_volume_record" — for any signal about Polymarket's April trading volume hitting $150B
   Don't be cute — same beat, same key. If a signal doesn't cluster with anything else, give it a unique key.
-- should_promote: boolean. true = worth showing on the dashboard. false = noise / off-topic / low-signal. Be ruthless — most generic political tweets from staffer accounts are NOT promote-worthy unless they touch a priority topic.
+- should_promote: boolean. true = worth showing on the dashboard. false = noise / off-topic / low-signal.
+  PROMOTE-WORTHY heuristics:
+  * Any signal directly mentioning Polymarket, Kalshi, prediction markets, event contracts, election betting, CFTC regulation of prediction markets, or named PM/Kalshi execs → DEFAULT TO TRUE.
+  * Any signal from sources serpapi / fed_register / fec / congress (these are already keyword-pre-filtered for relevance) → STRONG DEFAULT TO TRUE unless completely off-topic.
+  * Hill staffer / influencer chatter on these topics → TRUE.
+  NOT-PROMOTE: generic political tweets from watchlist accounts that don't touch any priority topic, content-free posts (links only, single emoji), spam / scam crypto posts.
+  Better to over-promote curated-source items than to under-promote — Caleb can mark noise on the dashboard, but he can't see what was rejected.
 - headline: ≤80 chars, factual, no spin. Used as the dashboard card title.
 - summary: 1-2 sentences. State what happened and why it matters. No em dashes. Operator voice.
 
