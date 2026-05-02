@@ -37,6 +37,32 @@ export async function GET(req: Request) {
       const r = await fetchCongressRecent();
       return NextResponse.json({ ok: true, count: r.length, sample: r.slice(0, 3) });
     }
+    if (source === 'congress_raw') {
+      // Diagnostic: hit Congress directly, return raw counts before any filtering.
+      const apiKey = process.env.CONGRESS_API_KEY || '';
+      const from = new Date(Date.now() - 7 * 86_400_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+      const to = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+      const u = new URL('https://api.congress.gov/v3/bill/119');
+      u.searchParams.set('api_key', apiKey);
+      u.searchParams.set('format', 'json');
+      u.searchParams.set('fromDateTime', from);
+      u.searchParams.set('toDateTime', to);
+      u.searchParams.set('sort', 'updateDate+desc');
+      u.searchParams.set('limit', '250');
+      const res = await fetch(u.toString(), { cache: 'no-store' });
+      const data = await res.json();
+      const bills: any[] = data.bills || [];
+      const keys = ['prediction market', 'kalshi', 'polymarket', 'event contract', 'cftc', 'binary option', 'election betting'];
+      const matches = bills.filter(b => keys.some(k => (b.title || '').toLowerCase().includes(k)));
+      return NextResponse.json({
+        ok: true,
+        url_path: u.pathname + u.search.replace(apiKey, 'REDACTED'),
+        status: res.status,
+        bills_returned: bills.length,
+        keyword_matches: matches.length,
+        match_titles: matches.map(b => `${b.type} ${b.number}: ${(b.title || '').slice(0, 90)}`),
+      });
+    }
     return NextResponse.json({ ok: false, error: 'source must be fed_register|fec|serpapi|congress' }, { status: 400 });
   } catch (err: any) {
     return NextResponse.json({
