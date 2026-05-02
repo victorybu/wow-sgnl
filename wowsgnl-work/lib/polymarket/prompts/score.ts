@@ -138,9 +138,13 @@ function normalizeTags(t: any): string[] {
 
 export async function scorePolymarketBatch(signals: ScoreInputSignal[]): Promise<ScoredSignal[]> {
   if (signals.length === 0) return [];
+  // ~250 tokens per scored item (10 fields + headline/summary). At
+  // BATCH_SIZE=20 in pm-analyze that's ~5000; budget 8000 for headroom
+  // so the JSON never truncates and the backfill (which marks all
+  // dropped signals as not-promotable) doesn't fire on the happy path.
   const resp = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 4000,
+    max_tokens: 8000,
     system: SYS,
     messages: [{ role: 'user', content: buildUser(signals) }],
   });

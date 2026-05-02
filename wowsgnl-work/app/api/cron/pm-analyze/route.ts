@@ -8,7 +8,11 @@ export const fetchCache = 'force-no-store';
 export const maxDuration = 300;
 
 const POLYMARKET_CLIENT_ID = 4;
-const BATCH_SIZE = 40;
+// 20 events per batch keeps the score prompt JSON output well within
+// max_tokens (8000). Earlier 40-event batches were truncating mid-JSON,
+// which fired the score.ts backfill marking every signal as
+// not-promotable — pm-analyze landed 0 promotions across 4 runs.
+const BATCH_SIZE = 20;
 
 // GET /api/cron/pm-analyze
 //
