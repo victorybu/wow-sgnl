@@ -68,7 +68,13 @@ async function getJson(path: string, params: Record<string, string | number>): P
 }
 
 function isoDaysAgo(d: number): string {
-  return new Date(Date.now() - d * 86_400_000).toISOString();
+  // Congress.gov silently returns 0 results when the ISO string has
+  // milliseconds (toISOString default). Strip them — format must be
+  // YYYY-MM-DDTHH:MM:SSZ.
+  return new Date(Date.now() - d * 86_400_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+function isoNow(): string {
+  return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
 
 function matchesKeyword(text: string): boolean {
@@ -80,7 +86,7 @@ function matchesKeyword(text: string): boolean {
 async function fetchRecentBills(): Promise<CongressItem[]> {
   const data = await getJson(`/bill/${CURRENT_CONGRESS}`, {
     fromDateTime: isoDaysAgo(7),
-    toDateTime: new Date().toISOString(),
+    toDateTime: isoNow(),
     sort: 'updateDate+desc',
     limit: 250,
   });
