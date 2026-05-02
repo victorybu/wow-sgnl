@@ -14,7 +14,9 @@
 const BASE = 'https://api.open.fec.gov/v1';
 
 function key(): string {
-  return process.env.FEC_API_KEY || '';
+  // Trim defensively — env vars pasted via the Vercel dashboard
+  // sometimes carry a trailing space/newline.
+  return (process.env.FEC_API_KEY || '').trim();
 }
 
 function todayUTC(): string {

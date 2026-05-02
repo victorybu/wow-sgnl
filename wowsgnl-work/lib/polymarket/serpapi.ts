@@ -14,7 +14,9 @@ import { createHash } from 'crypto';
 const BASE = 'https://serpapi.com/search';
 
 function key(): string {
-  return process.env.SERPAPI_KEY || '';
+  // Trim defensively — env vars pasted via the Vercel dashboard
+  // sometimes carry a trailing space/newline.
+  return (process.env.SERPAPI_KEY || '').trim();
 }
 
 export type SerpItem = {

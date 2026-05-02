@@ -16,7 +16,10 @@
 const BASE = 'https://api.congress.gov/v3';
 
 function key(): string {
-  return process.env.CONGRESS_API_KEY || '';
+  // Trim defensively — env vars pasted via the Vercel dashboard
+  // sometimes carry a trailing space/newline that URL-encodes as "+"
+  // and trips Congress.gov's strict key validation (returns 403).
+  return (process.env.CONGRESS_API_KEY || '').trim();
 }
 
 // Prediction-market-relevant keywords applied to bill titles / CRec text.
