@@ -23,7 +23,8 @@ export async function GET(req: Request) {
     ORDER BY id DESC
     LIMIT ${n}
   `;
-  const signals = r.rows.map((row: any) => ({
+  type Sig = { id: number; source: string; author: string | null; content: string; url: string | null; posted_at: string | null };
+  const signals: Sig[] = r.rows.map((row: any) => ({
     id: row.id,
     source: row.source || 'unknown',
     author: row.author,
