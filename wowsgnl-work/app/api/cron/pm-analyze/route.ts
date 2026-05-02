@@ -40,7 +40,19 @@ export async function GET() {
         SELECT 1 FROM pm_intel_items pi
         WHERE e.id = ANY(pi.signal_event_ids)
       )
-    ORDER BY e.created_at DESC, e.id DESC
+    ORDER BY
+      -- Curated sources first (pre-filtered to be Polymarket-relevant
+      -- by their respective lib queries). Twitter is broad watcher
+      -- chatter — most isn't promote-worthy. Without this ordering
+      -- the first batches drown in raw Twitter noise.
+      CASE e.source
+        WHEN 'serpapi' THEN 1
+        WHEN 'fed_register' THEN 1
+        WHEN 'fec' THEN 1
+        WHEN 'congress' THEN 1
+        ELSE 2
+      END,
+      e.created_at DESC, e.id DESC
     LIMIT ${BATCH_SIZE}
   `;
 
