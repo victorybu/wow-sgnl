@@ -1,6 +1,7 @@
 {
   "crons": [
     { "path": "/api/poll", "schedule": "0 */3 * * *" },
-    { "path": "/api/cron/engagement", "schedule": "0 14 * * *" }
+    { "path": "/api/cron/engagement", "schedule": "0 14 * * *" },
+    { "path": "/api/cron/pm-ingest", "schedule": "0 10 * * *" }
   ]
 }
