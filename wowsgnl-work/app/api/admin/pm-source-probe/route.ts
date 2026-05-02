@@ -39,7 +39,7 @@ export async function GET(req: Request) {
     }
     if (source === 'congress_raw') {
       // Diagnostic: hit Congress directly, return raw counts before any filtering.
-      const apiKey = process.env.CONGRESS_API_KEY || '';
+      const apiKey = (process.env.CONGRESS_API_KEY || '').trim();
       const from = new Date(Date.now() - 7 * 86_400_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
       const to = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
       const u = new URL('https://api.congress.gov/v3/bill/119');
