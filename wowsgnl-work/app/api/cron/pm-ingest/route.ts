@@ -12,6 +12,34 @@ export const maxDuration = 300;
 
 const POLYMARKET_CLIENT_ID = 4;
 
+// Some upstream sources hand back date strings that aren't valid
+// PostgreSQL timestamps (SerpAPI in particular returns things like
+// "2 hours ago" or "Apr 30, 2026"). Normalize to ISO or null before
+// passing to ::timestamptz so a single bad date doesn't poison the
+// whole insert with NeonDbError: invalid input syntax.
+function safeIso(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  // Direct ISO / YYYY-MM-DD
+  const direct = Date.parse(s);
+  if (Number.isFinite(direct)) return new Date(direct).toISOString();
+  // "X minutes/hours/days ago"
+  const rel = s.match(/^(\d+)\s+(minute|hour|day|week|month)s?\s+ago/i);
+  if (rel) {
+    const n = parseInt(rel[1], 10);
+    const unit = rel[2].toLowerCase();
+    const ms =
+      unit === 'minute' ? n * 60_000 :
+      unit === 'hour' ? n * 3_600_000 :
+      unit === 'day' ? n * 86_400_000 :
+      unit === 'week' ? n * 7 * 86_400_000 :
+      unit === 'month' ? n * 30 * 86_400_000 : 0;
+    if (ms > 0) return new Date(Date.now() - ms).toISOString();
+  }
+  return null;
+}
+
 // GET /api/cron/pm-ingest
 //
 // Daily Polymarket-scoped ingestion. Pulls from 4 new sources
@@ -60,7 +88,7 @@ export async function GET() {
       const ins = await sql`
         INSERT INTO events (client_id, source, source_id, author, content, url, posted_at)
         VALUES (${POLYMARKET_CLIENT_ID}, 'fed_register', ${d.document_number},
-                ${author}, ${content}, ${d.html_url}, ${d.publication_date}::timestamptz)
+                ${author}, ${content}, ${d.html_url}, ${safeIso(d.publication_date)}::timestamptz)
         ON CONFLICT (source, source_id) DO NOTHING
         RETURNING id
       `;
@@ -82,7 +110,7 @@ export async function GET() {
       const ins = await sql`
         INSERT INTO events (client_id, source, source_id, author, content, url, posted_at)
         VALUES (${POLYMARKET_CLIENT_ID}, 'fec', ${it.source_id},
-                ${'FEC'}, ${content}, ${it.url}, ${it.occurred_at}::timestamptz)
+                ${'FEC'}, ${content}, ${it.url}, ${safeIso(it.occurred_at)}::timestamptz)
         ON CONFLICT (source, source_id) DO NOTHING
         RETURNING id
       `;
@@ -104,7 +132,7 @@ export async function GET() {
       const ins = await sql`
         INSERT INTO events (client_id, source, source_id, author, content, url, posted_at)
         VALUES (${POLYMARKET_CLIENT_ID}, 'serpapi', ${it.source_id},
-                ${it.source_name}, ${content}, ${it.url}, ${it.occurred_at}::timestamptz)
+                ${it.source_name}, ${content}, ${it.url}, ${safeIso(it.occurred_at)}::timestamptz)
         ON CONFLICT (source, source_id) DO NOTHING
         RETURNING id
       `;
@@ -126,7 +154,7 @@ export async function GET() {
       const ins = await sql`
         INSERT INTO events (client_id, source, source_id, author, content, url, posted_at)
         VALUES (${POLYMARKET_CLIENT_ID}, 'congress', ${it.source_id},
-                ${it.author}, ${content}, ${it.url}, ${it.occurred_at}::timestamptz)
+                ${it.author}, ${content}, ${it.url}, ${safeIso(it.occurred_at)}::timestamptz)
         ON CONFLICT (source, source_id) DO NOTHING
         RETURNING id
       `;
