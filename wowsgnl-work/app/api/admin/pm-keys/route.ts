@@ -13,7 +13,16 @@ export async function GET() {
   const status: Record<string, { present: boolean; length: number }> = {};
   for (const k of keys) {
     const v = process.env[k] || '';
-    status[k] = { present: v.length > 0, length: v.length };
+    const trimmed = v.trim();
+    // Char codes of last 3 raw + last 3 trimmed for whitespace detection.
+    const tail = (s: string) => Array.from(s.slice(-3)).map(c => c.charCodeAt(0));
+    status[k] = {
+      present: v.length > 0,
+      length: v.length,
+      trimmed_length: trimmed.length,
+      raw_tail_codes: tail(v),
+      trimmed_tail_codes: tail(trimmed),
+    } as any;
   }
   return NextResponse.json({ ok: true, env: status });
 }
