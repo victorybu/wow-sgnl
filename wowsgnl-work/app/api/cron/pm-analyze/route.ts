@@ -1,5 +1,6 @@
 import { sql } from '@/lib/db';
 import { scorePolymarketBatch, type ScoreInputSignal } from '@/lib/polymarket/prompts/score';
+import { generateTodaysRead, type TodaysReadInputItem, type PriorityPerson } from '@/lib/polymarket/prompts/todays-read';
 import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
@@ -192,6 +193,111 @@ export async function GET() {
     }
   }
 
+  // === STEP 2: Today's Read narrative generator ===
+  // After scoring + dedup, synthesize today's promoted items into one
+  // morning narrative paragraph. Idempotent: if today's Today's Read
+  // row already exists (headline starts with "Today's Read · "),
+  // UPDATE it instead of inserting a duplicate. Skips entirely if
+  // there are no promoted items today (don't burn an Opus call to
+  // produce nothing).
+  let todaysReadGenerated = false;
+  try {
+    // Today's promoted items (excludes the noise bucket — its
+    // headline starts with "(noise)").
+    const todayItemsRes = await sql`
+      SELECT id, category, headline, summary, valence, source_links
+      FROM pm_intel_items
+      WHERE for_date = ${today}::date
+        AND headline NOT LIKE '(noise)%'
+        AND headline NOT LIKE 'Today''s Read · %'
+      ORDER BY priority ASC, ABS(COALESCE(valence, 0)) DESC, id DESC
+      LIMIT 25
+    `;
+    const todayItems: TodaysReadInputItem[] = todayItemsRes.rows.map((r: any) => ({
+      id: r.id, category: r.category, headline: r.headline, summary: r.summary,
+      valence: r.valence, source_links: r.source_links || [],
+    }));
+
+    if (todayItems.length > 0) {
+      // Last 7 days of high-priority context (excluding today and noise).
+      const weekRes = await sql`
+        SELECT id, category, headline, summary, valence, source_links
+        FROM pm_intel_items
+        WHERE for_date >= (CURRENT_DATE - INTERVAL '7 days')
+          AND for_date < ${today}::date
+          AND headline NOT LIKE '(noise)%'
+          AND headline NOT LIKE 'Today''s Read · %'
+          AND priority <= 2
+        ORDER BY for_date DESC, priority ASC
+        LIMIT 15
+      `;
+      const weekContext: TodaysReadInputItem[] = weekRes.rows.map((r: any) => ({
+        id: r.id, category: r.category, headline: r.headline, summary: r.summary,
+        valence: r.valence, source_links: r.source_links || [],
+      }));
+
+      // Priority people for action-hint context.
+      const peopleRes = await sql`
+        SELECT name, role, employer, lane, posture, last_touched
+        FROM pm_people
+        WHERE priority = TRUE
+        ORDER BY last_touched DESC NULLS LAST
+        LIMIT 12
+      `;
+      const priorityPeople: PriorityPerson[] = peopleRes.rows.map((r: any) => ({
+        name: r.name, role: r.role, employer: r.employer, lane: r.lane,
+        posture: r.posture, last_touched: r.last_touched,
+      }));
+
+      const result = await generateTodaysRead({
+        todayItems, weekContext, priorityPeople, forDate: today,
+      });
+
+      if (result && result.narrative) {
+        // Check for existing Today's Read row for today.
+        const existing = await sql`
+          SELECT id FROM pm_intel_items
+          WHERE for_date = ${today}::date
+            AND category = 'todays_read'
+            AND headline LIKE 'Today''s Read · %'
+          LIMIT 1
+        `;
+        const headline = `Today's Read · ${today}`;
+        const tagsArr = ['todays_read', 'daily_summary'];
+        const linksJson = JSON.stringify(result.source_links || []);
+        const hintsCsv = result.action_hints.join(' · ');
+        const memberIdsForRow = todayItems.map(t => t.id);
+        if (existing.rows.length > 0) {
+          await sql`
+            UPDATE pm_intel_items
+            SET signal_event_ids = ${memberIdsForRow}::int[],
+                summary = ${result.narrative},
+                analysis = ${hintsCsv || null},
+                source_links = ${linksJson}::jsonb,
+                topic_tags = ${tagsArr}::text[],
+                priority = 1,
+                valence = 0
+            WHERE id = ${existing.rows[0].id}
+          `;
+        } else {
+          await sql`
+            INSERT INTO pm_intel_items
+              (signal_event_ids, category, headline, summary, analysis,
+               valence, priority, topic_tags, source_links, for_date)
+            VALUES
+              (${memberIdsForRow}::int[], 'todays_read', ${headline},
+               ${result.narrative}, ${hintsCsv || null},
+               0, 1, ${tagsArr}::text[],
+               ${linksJson}::jsonb, ${today}::date)
+          `;
+        }
+        todaysReadGenerated = true;
+      }
+    }
+  } catch (err: any) {
+    errors.push(`todays_read: ${err?.message || 'unknown'}`);
+  }
+
   // Snapshot of pm_intel_items state.
   const totals = await sql`
     SELECT
@@ -207,6 +313,7 @@ export async function GET() {
     promoted: promotedCount,
     clusters_created: clustersCreated,
     noise_bucket: noiseSignalIds.length,
+    todays_read_generated: todaysReadGenerated,
     totals: totals.rows[0],
     errors,
   });
